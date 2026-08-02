@@ -91,7 +91,7 @@ export default function YeniProjePage() {
 
   // Otomatik rota
   const rota = projeRotasiHesapla(
-    { ...form, baskili: form.baskili, sonic_var: form.sonic_var, cikti_turu: form.cikti_turu as any },
+    { baskili: form.baskili, sonic_var: form.sonic_var, cikti_turu: form.cikti_turu as any, en_mm: parseFloat(form.en_mm)||0, boy_mm: parseFloat(form.boy_mm)||0, kurek_mm: parseFloat(form.kurek_mm)||0, kapak_mm: parseFloat(form.kapak_mm)||0, bobin_en_mm: parseFloat(form.bobin_en_mm)||0, yan_yana_baski: parseInt(form.yan_yana_baski)||1 },
     katmanlar
   )
 
