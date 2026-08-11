@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
@@ -10,74 +10,93 @@ export default function YeniMusteriPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  const [bolum, setBolum] = useState<'temel'|'iletisim'|'adres'|'ticari'>('temel')
-  const [form, setForm] = useState({
-    ad:'', vergi_no:'', vergi_dairesi:'', sektor:'', sehir:'', ulke:'Turkiye',
-    yetkili_ad:'', yetkili_tel:'', yetkili_email:'',
-    satis_ad:'', satis_tel:'', satis_email:'',
-    muhasebe_ad:'', muhasebe_tel:'', muhasebe_email:'',
-    gm_ad:'', gm_tel:'',
-    fatura_adresi:'', fatura_ilce:'', fatura_sehir:'', fatura_posta_kodu:'',
-    sevk_adresi:'', sevk_ilce:'', sevk_sehir:'', sevk_posta_kodu:'',
-    fabrika_adresi:'',
-    para_birimi:'USD', vade_gun:'30', kredi_limiti:'',
-    tercih_notlari:'', notlar:'',
-  })
+  const [bolum, setBolum] = useState('temel')
 
-  function setF(k: string, v: string) { setForm(p => ({...p, [k]:v})) }
+  // Her alan icin ayri state — re-render sorunu olmaz
+  const [ad, setAd] = useState('')
+  const [vergiNo, setVergiNo] = useState('')
+  const [vergiDairesi, setVergiDairesi] = useState('')
+  const [sektor, setSektor] = useState('')
+  const [sehir, setSehir] = useState('')
+  const [yetkiliAd, setYetkiliAd] = useState('')
+  const [yetkiliTel, setYetkiliTel] = useState('')
+  const [yetkiliEmail, setYetkiliEmail] = useState('')
+  const [satisAd, setSatisAd] = useState('')
+  const [satisTel, setSatisTel] = useState('')
+  const [satisEmail, setSatisEmail] = useState('')
+  const [muhasebeAd, setMuhasebeAd] = useState('')
+  const [muhasebeTel, setMuhasebeTel] = useState('')
+  const [muhasebeEmail, setMuhasebeEmail] = useState('')
+  const [gmAd, setGmAd] = useState('')
+  const [gmTel, setGmTel] = useState('')
+  const [faturaAdres, setFaturaAdres] = useState('')
+  const [faturaIlce, setFaturaIlce] = useState('')
+  const [faturaSehir, setFaturaSehir] = useState('')
+  const [faturaPosta, setFaturaPosta] = useState('')
+  const [sevkAdres, setSevkAdres] = useState('')
+  const [sevkIlce, setSevkIlce] = useState('')
+  const [sevkSehir, setSevkSehir] = useState('')
+  const [sevkPosta, setSevkPosta] = useState('')
+  const [fabrikaAdres, setFabrikaAdres] = useState('')
+  const [paraBirimi, setParaBirimi] = useState('USD')
+  const [vadeGun, setVadeGun] = useState('30')
+  const [krediLimiti, setKrediLimiti] = useState('')
+  const [tercihNotlari, setTercihNotlari] = useState('')
+  const [notlar, setNotlar] = useState('')
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (!ad.trim()) { setMsg('Firma adi zorunlu.'); return }
     setSaving(true); setMsg('')
-    if (!form.ad.trim()) { setMsg('Firma adi zorunlu.'); setSaving(false); return }
 
     const { count } = await supabase.from('musteri_tanim').select('id', {count:'exact', head:true})
     const kod = `MUS-${String((count||0)+1).padStart(4,'0')}`
 
     const { error } = await supabase.from('musteri_tanim').insert({
-      ad: form.ad.trim(), kod,
-      vergi_no: form.vergi_no||null,
-      vergi_dairesi: form.vergi_dairesi||null,
-      sektor: form.sektor||null,
-      sehir: form.sehir||null,
-      ulke: form.ulke||'Turkiye',
-      iletisim_ad: form.yetkili_ad||null,
-      telefon: form.yetkili_tel||null,
-      email: form.yetkili_email||null,
-      adres: form.fatura_adresi||null,
-      para_birimi: form.para_birimi,
-      vade_gun: parseInt(form.vade_gun)||30,
-      kredi_limiti: parseFloat(form.kredi_limiti)||0,
+      ad: ad.trim(),
+      kod,
+      vergi_no: vergiNo||null,
+      vergi_dairesi: vergiDairesi||null,
+      sektor: sektor||null,
+      sehir: sehir||null,
+      ulke: 'Turkiye',
+      iletisim_ad: yetkiliAd||null,
+      telefon: yetkiliTel||null,
+      email: yetkiliEmail||null,
+      adres: faturaAdres||null,
+      para_birimi: paraBirimi,
+      vade_gun: parseInt(vadeGun)||30,
+      kredi_limiti: parseFloat(krediLimiti)||0,
       notlar: JSON.stringify({
-        satis: {ad:form.satis_ad,tel:form.satis_tel,email:form.satis_email},
-        muhasebe: {ad:form.muhasebe_ad,tel:form.muhasebe_tel,email:form.muhasebe_email},
-        gm: {ad:form.gm_ad,tel:form.gm_tel},
-        fatura_adresi: {adres:form.fatura_adresi,ilce:form.fatura_ilce,sehir:form.fatura_sehir,posta:form.fatura_posta_kodu},
-        sevk_adresi: {adres:form.sevk_adresi,ilce:form.sevk_ilce,sehir:form.sevk_sehir,posta:form.sevk_posta_kodu},
-        fabrika_adresi: form.fabrika_adresi,
-        tercih_notlari: form.tercih_notlari,
-        genel_notlar: form.notlar,
+        satis: {ad:satisAd, tel:satisTel, email:satisEmail},
+        muhasebe: {ad:muhasebeAd, tel:muhasebeTel, email:muhasebeEmail},
+        gm: {ad:gmAd, tel:gmTel},
+        fatura_adresi: {adres:faturaAdres, ilce:faturaIlce, sehir:faturaSehir, posta:faturaPosta},
+        sevk_adresi: {adres:sevkAdres, ilce:sevkIlce, sehir:sevkSehir, posta:sevkPosta},
+        fabrika_adresi: fabrikaAdres,
+        tercih_notlari: tercihNotlari,
+        genel_notlar: notlar,
       }),
       aktif: true,
     })
 
-    if (error) { setMsg('Hata: '+error.message); setSaving(false); return }
+    if (error) {
+      setMsg('Hata: ' + error.message)
+      setSaving(false)
+      return
+    }
     router.push('/musteriler')
   }
 
-  const Tab = ({k, l}: {k: typeof bolum, l: string}) => (
-    <button type="button" onClick={()=>setBolum(k)}
-      className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${bolum===k?'border-blue-600 text-blue-600 font-medium':'border-transparent text-gray-500 hover:text-gray-700'}`}>
-      {l}
-    </button>
-  )
+  function sevkAdresiniFaturaGibi() {
+    setSevkAdres(faturaAdres)
+    setSevkIlce(faturaIlce)
+    setSevkSehir(faturaSehir)
+    setSevkPosta(faturaPosta)
+  }
 
-  const Field = ({label, k, type='text', placeholder='', required=false, col=1}: any) => (
-    <div className={col===2?'col-span-2':''}>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}{required&&<span className="text-red-500 ml-0.5">*</span>}</label>
-      <input type={type} value={(form as any)[k]} onChange={e=>setF(k,e.target.value)} placeholder={placeholder} required={required} />
-    </div>
-  )
+  const tabCls = (k: string) =>
+    `px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors ${bolum===k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`
 
   return (
     <div className="p-6 max-w-3xl">
@@ -88,42 +107,44 @@ export default function YeniMusteriPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSave}>
-        {/* Sekmeler */}
-        <div className="flex gap-0 mb-0 border-b border-gray-200">
-          <Tab k="temel" l="Firma bilgileri" />
-          <Tab k="iletisim" l="Iletisim" />
-          <Tab k="adres" l="Adresler" />
-          <Tab k="ticari" l="Ticari" />
+      <form onSubmit={handleSave} autoComplete="off">
+        <div className="flex gap-0 border-b border-gray-200 mb-0">
+          <button type="button" className={tabCls('temel')} onClick={()=>setBolum('temel')}>Firma bilgileri</button>
+          <button type="button" className={tabCls('iletisim')} onClick={()=>setBolum('iletisim')}>Iletisim</button>
+          <button type="button" className={tabCls('adres')} onClick={()=>setBolum('adres')}>Adresler</button>
+          <button type="button" className={tabCls('ticari')} onClick={()=>setBolum('ticari')}>Ticari</button>
         </div>
 
-        <div className="card rounded-tl-none mt-0" style={{borderTopLeftRadius:0}}>
+        <div className="card" style={{borderTopLeftRadius:0, borderTopRightRadius:0}}>
           <div className="card-body">
 
-            {/* TEMEL */}
             {bolum === 'temel' && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Firma unvani <span className="text-red-500">*</span></label>
-                  <input value={form.ad} onChange={e=>setF('ad',e.target.value)}
-                    placeholder="ABC Gida San. Tic. A.S." required
-                    className="text-base font-medium" />
+                  <label>Firma unvani <span className="text-red-500">*</span></label>
+                  <input value={ad} onChange={e => setAd(e.target.value)} placeholder="ABC Gida San. Tic. A.S." autoFocus />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Vergi numarasi" k="vergi_no" placeholder="1234567890" />
-                  <Field label="Vergi dairesi" k="vergi_dairesi" placeholder="Kadikoy" />
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Sektor</label>
-                    <select value={form.sektor} onChange={e=>setF('sektor',e.target.value)}>
+                    <label>Vergi numarasi</label>
+                    <input value={vergiNo} onChange={e => setVergiNo(e.target.value)} placeholder="1234567890" />
+                  </div>
+                  <div>
+                    <label>Vergi dairesi</label>
+                    <input value={vergiDairesi} onChange={e => setVergiDairesi(e.target.value)} placeholder="Kadikoy" />
+                  </div>
+                  <div>
+                    <label>Sektor</label>
+                    <select value={sektor} onChange={e => setSektor(e.target.value)}>
                       <option value="">Secin...</option>
-                      {SEKTORLER.map(s=><option key={s}>{s}</option>)}
+                      {SEKTORLER.map(s => <option key={s}>{s}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Sehir</label>
-                    <select value={form.sehir} onChange={e=>setF('sehir',e.target.value)}>
+                    <label>Sehir</label>
+                    <select value={sehir} onChange={e => setSehir(e.target.value)}>
                       <option value="">Secin...</option>
-                      {SEHIRLER.map(s=><option key={s}>{s}</option>)}
+                      {SEHIRLER.map(s => <option key={s}>{s}</option>)}
                     </select>
                   </div>
                 </div>
@@ -133,112 +154,105 @@ export default function YeniMusteriPage() {
               </div>
             )}
 
-            {/* ILETISIM */}
             {bolum === 'iletisim' && (
               <div className="space-y-5">
                 <div>
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Satin alma / Ana yetkili</div>
                   <div className="grid grid-cols-3 gap-3">
-                    <Field label="Ad soyad" k="yetkili_ad" placeholder="Ahmet Yilmaz" />
-                    <Field label="Telefon" k="yetkili_tel" type="tel" placeholder="0532 xxx xx xx" />
-                    <Field label="E-posta" k="yetkili_email" type="email" placeholder="ahmet@firma.com" />
+                    <div><label>Ad soyad</label><input value={yetkiliAd} onChange={e=>setYetkiliAd(e.target.value)} placeholder="Ahmet Yilmaz" /></div>
+                    <div><label>Telefon</label><input value={yetkiliTel} onChange={e=>setYetkiliTel(e.target.value)} placeholder="0532 xxx xx xx" /></div>
+                    <div><label>E-posta</label><input type="email" value={yetkiliEmail} onChange={e=>setYetkiliEmail(e.target.value)} placeholder="ahmet@firma.com" /></div>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Satis sorumlusu</div>
                   <div className="grid grid-cols-3 gap-3">
-                    <Field label="Ad soyad" k="satis_ad" placeholder="Mehmet Kaya" />
-                    <Field label="Telefon" k="satis_tel" type="tel" placeholder="0533 xxx xx xx" />
-                    <Field label="E-posta" k="satis_email" type="email" placeholder="mehmet@firma.com" />
+                    <div><label>Ad soyad</label><input value={satisAd} onChange={e=>setSatisAd(e.target.value)} placeholder="Mehmet Kaya" /></div>
+                    <div><label>Telefon</label><input value={satisTel} onChange={e=>setSatisTel(e.target.value)} placeholder="0533 xxx xx xx" /></div>
+                    <div><label>E-posta</label><input type="email" value={satisEmail} onChange={e=>setSatisEmail(e.target.value)} placeholder="mehmet@firma.com" /></div>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Muhasebe</div>
                   <div className="grid grid-cols-3 gap-3">
-                    <Field label="Ad soyad" k="muhasebe_ad" placeholder="Ayse Demir" />
-                    <Field label="Telefon" k="muhasebe_tel" type="tel" placeholder="0534 xxx xx xx" />
-                    <Field label="E-posta" k="muhasebe_email" type="email" placeholder="muhasebe@firma.com" />
+                    <div><label>Ad soyad</label><input value={muhasebeAd} onChange={e=>setMuhasebeAd(e.target.value)} placeholder="Ayse Demir" /></div>
+                    <div><label>Telefon</label><input value={muhasebeTel} onChange={e=>setMuhasebeTel(e.target.value)} placeholder="0534 xxx xx xx" /></div>
+                    <div><label>E-posta</label><input type="email" value={muhasebeEmail} onChange={e=>setMuhasebeEmail(e.target.value)} placeholder="muhasebe@firma.com" /></div>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Genel mudur / Sahip</div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Ad soyad" k="gm_ad" placeholder="Ali Veli" />
-                    <Field label="Telefon" k="gm_tel" type="tel" placeholder="0535 xxx xx xx" />
+                    <div><label>Ad soyad</label><input value={gmAd} onChange={e=>setGmAd(e.target.value)} placeholder="Ali Veli" /></div>
+                    <div><label>Telefon</label><input value={gmTel} onChange={e=>setGmTel(e.target.value)} placeholder="0535 xxx xx xx" /></div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* ADRES */}
             {bolum === 'adres' && (
               <div className="space-y-5">
                 <div>
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Fatura adresi</div>
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Adres</label>
-                      <textarea value={form.fatura_adresi} onChange={e=>setF('fatura_adresi',e.target.value)} rows={2} placeholder="Mahalle, cadde, sokak, bina no..." />
-                    </div>
+                    <div><label>Adres</label>
+                      <textarea value={faturaAdres} onChange={e=>setFaturaAdres(e.target.value)} rows={2} placeholder="Mahalle, cadde, sokak, bina no..." /></div>
                     <div className="grid grid-cols-3 gap-3">
-                      <Field label="Ilce" k="fatura_ilce" placeholder="Kadikoy" />
-                      <Field label="Sehir" k="fatura_sehir" placeholder="Istanbul" />
-                      <Field label="Posta kodu" k="fatura_posta_kodu" placeholder="34710" />
+                      <div><label>Ilce</label><input value={faturaIlce} onChange={e=>setFaturaIlce(e.target.value)} placeholder="Kadikoy" /></div>
+                      <div><label>Sehir</label><input value={faturaSehir} onChange={e=>setFaturaSehir(e.target.value)} placeholder="Istanbul" /></div>
+                      <div><label>Posta kodu</label><input value={faturaPosta} onChange={e=>setFaturaPosta(e.target.value)} placeholder="34710" /></div>
                     </div>
                   </div>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sevk adresi</div>
-                    <button type="button" className="text-xs text-blue-600 hover:underline"
-                      onClick={()=>setForm(p=>({...p,sevk_adresi:p.fatura_adresi,sevk_ilce:p.fatura_ilce,sevk_sehir:p.fatura_sehir,sevk_posta_kodu:p.fatura_posta_kodu}))}>
-                      Fatura adresiyle ayni
-                    </button>
+                    <button type="button" onClick={sevkAdresiniFaturaGibi} className="text-xs text-blue-600 hover:underline">Fatura adresiyle ayni</button>
                   </div>
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Adres</label>
-                      <textarea value={form.sevk_adresi} onChange={e=>setF('sevk_adresi',e.target.value)} rows={2} placeholder="Sevkiyat adresi..." />
-                    </div>
+                    <div><label>Adres</label>
+                      <textarea value={sevkAdres} onChange={e=>setSevkAdres(e.target.value)} rows={2} placeholder="Sevkiyat adresi..." /></div>
                     <div className="grid grid-cols-3 gap-3">
-                      <Field label="Ilce" k="sevk_ilce" placeholder="Esenyurt" />
-                      <Field label="Sehir" k="sevk_sehir" placeholder="Istanbul" />
-                      <Field label="Posta kodu" k="sevk_posta_kodu" placeholder="34510" />
+                      <div><label>Ilce</label><input value={sevkIlce} onChange={e=>setSevkIlce(e.target.value)} placeholder="Esenyurt" /></div>
+                      <div><label>Sehir</label><input value={sevkSehir} onChange={e=>setSevkSehir(e.target.value)} placeholder="Istanbul" /></div>
+                      <div><label>Posta kodu</label><input value={sevkPosta} onChange={e=>setSevkPosta(e.target.value)} placeholder="34510" /></div>
                     </div>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Fabrika / Depo (opsiyonel)</div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Adres</label>
-                    <textarea value={form.fabrika_adresi} onChange={e=>setF('fabrika_adresi',e.target.value)} rows={2} placeholder="Fabrika veya depo adresi..." />
-                  </div>
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Fabrika / Depo (opsiyonel)</div>
+                  <textarea value={fabrikaAdres} onChange={e=>setFabrikaAdres(e.target.value)} rows={2} placeholder="Fabrika veya depo adresi..." />
                 </div>
               </div>
             )}
 
-            {/* TICARI */}
             {bolum === 'ticari' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Para birimi</label>
-                    <select value={form.para_birimi} onChange={e=>setF('para_birimi',e.target.value)}>
-                      <option value="USD">USD — Amerikan Dolari</option>
+                    <label>Para birimi</label>
+                    <select value={paraBirimi} onChange={e=>setParaBirimi(e.target.value)}>
+                      <option value="USD">USD — Dolar</option>
                       <option value="EUR">EUR — Euro</option>
                     </select>
                   </div>
-                  <Field label="Odeme vadesi (gun)" k="vade_gun" type="number" placeholder="30" />
-                  <Field label="Kredi limiti (USD)" k="kredi_limiti" type="number" placeholder="50000" />
+                  <div>
+                    <label>Odeme vadesi (gun)</label>
+                    <input type="number" value={vadeGun} onChange={e=>setVadeGun(e.target.value)} placeholder="30" />
+                  </div>
+                  <div>
+                    <label>Kredi limiti (USD)</label>
+                    <input type="number" value={krediLimiti} onChange={e=>setKrediLimiti(e.target.value)} placeholder="50000" />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Ambalaj tercihleri / ozel istekler</label>
-                  <textarea value={form.tercih_notlari} onChange={e=>setF('tercih_notlari',e.target.value)}
+                  <label>Ambalaj tercihleri / ozel istekler</label>
+                  <textarea value={tercihNotlari} onChange={e=>setTercihNotlari(e.target.value)}
                     rows={3} placeholder="Ornek: Minimum 1500m sargi, max 30cm cap, gida onayli malzeme..." />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Genel notlar</label>
-                  <textarea value={form.notlar} onChange={e=>setF('notlar',e.target.value)} rows={2} placeholder="Diger notlar..." />
+                  <label>Genel notlar</label>
+                  <textarea value={notlar} onChange={e=>setNotlar(e.target.value)} rows={2} placeholder="Diger notlar..." />
                 </div>
               </div>
             )}
@@ -247,12 +261,12 @@ export default function YeniMusteriPage() {
 
         {msg && <div className="mt-3 bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3 border border-red-200">{msg}</div>}
 
-        <div className="flex gap-3 mt-4">
+        <div className="flex gap-3 mt-4 items-center">
           <button type="submit" disabled={saving} className="btn btn-primary">
             {saving ? 'Kaydediliyor...' : 'Musteri kaydet'}
           </button>
           <button type="button" onClick={() => router.back()} className="btn">Iptal</button>
-          <span className="text-xs text-gray-400 self-center ml-2">Sadece firma adi zorunlu, digerleri opsiyonel</span>
+          <span className="text-xs text-gray-400 ml-2">Sadece firma adi zorunlu</span>
         </div>
       </form>
     </div>
