@@ -49,8 +49,7 @@ export default function YeniMusteriPage() {
     if (!ad.trim()) { setMsg('Firma adi zorunlu.'); return }
     setSaving(true); setMsg('')
 
-    const { count } = await supabase.from('musteri_tanim').select('id', {count:'exact', head:true})
-    const kod = `MUS-${String((count||0)+1).padStart(4,'0')}`
+    const kod = `MUS-${Date.now().toString().slice(-6)}`
 
     const { error } = await supabase.from('musteri_tanim').insert({
       ad: ad.trim(),
