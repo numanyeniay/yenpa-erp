@@ -229,7 +229,8 @@ export function katoEniHesapla(proje: Partial<Proje>): number {
 
   if (cikti === 'bobin') return proje.bobin_en_mm || enMm
   if (cikti === 'sirt_kaynak') return boyMm * 2  // boy × 2 yüzey
+  if (cikti === 'doypack' || cikti === 'flat_bottom') return boyMm * 2 + kurekMm  // boy×2 + körük
+  if (cikti === 'quadro') return (enMm * 2) + (kurekMm * 2)  // en×2 + körük×2
   if (cikti === 'yan_kesim' || cikti === 'katlama_torba') return (enMm + kurekMm) * (proje.yan_yana_baski || 1)
-  if (cikti === 'doypack' || cikti === 'quadro') return enMm + kurekMm
   return enMm
 }
