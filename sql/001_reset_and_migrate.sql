@@ -106,6 +106,7 @@ create table malzeme_tanim (
   yogunluk numeric(6,3),        -- g/cm³
   min_mikron integer,           -- mikron alt limit
   max_mikron integer,           -- mikron üst limit
+  min_stok_kg numeric(12,3),    -- kritik stok eşiği (dashboard uyarısı için)
   birim text default 'kg' check (birim in ('kg','m2','adet','litre')),
   notlar text,
   aktif boolean default true,
@@ -213,6 +214,23 @@ create table makine_tanim (
 );
 
 -- ============================================================
+-- 9b. FASON FİYAT (doypack/quadro/flat_bottom/sırt kaynak için
+--     kademeli fason kesim fiyatları — uygulama kodu bu tabloyu
+--     zaten sorguluyordu ama tablo hiç tanımlanmamıştı)
+-- ============================================================
+create table fason_fiyat (
+  id uuid primary key default gen_random_uuid(),
+  tur text not null check (tur in ('doypack','quadro','flat_bottom','sirt_kaynak')),
+  min_gram numeric(10,2) not null,
+  max_gram numeric(10,2),          -- null = ust sinir yok
+  birim_fiyat_kg numeric(12,4) not null,
+  para_birimi text default 'USD',
+  aktif boolean default true,
+  notlar text,
+  olusturma timestamptz default now()
+);
+
+-- ============================================================
 -- 10. PROJE (Her müşteri işi bir proje)
 -- ============================================================
 create table proje (
@@ -241,7 +259,7 @@ create table proje (
   baskili_yuz text check (baskili_yuz in ('ust','alt')),  -- üst/alt baskı
   renk_sayisi integer,
   kato_eni_mm numeric(8,2),       -- baskı kato eni (ham bobin eni)
-  yan_yana_baskı integer default 1, -- yan yana kaç baskı
+  yan_yana_baski integer default 1, -- yan yana kaç baskı
   -- Özel işlemler
   zip_var boolean default false,
   sonic_var boolean default false,
@@ -251,7 +269,7 @@ create table proje (
   -- Durum
   durum text default 'taslak' check (durum in (
     'taslak','fiyatlama','proforma_gonderildi',
-    'musteri_onayladi','uretimdе','tamamlandi','iptal'
+    'musteri_onayladi','uretimde','tamamlandi','iptal'
   )),
   -- Tasarım
   tasarim_dosya_url text,
@@ -363,7 +381,7 @@ create table uretim_adim (
   plan_id uuid references uretim_plani(id),
   proje_id uuid references proje(id),
   makine_id uuid references makine_tanim(id),
-  operatör_id uuid references kullanici_tanim(id),
+  operator_id uuid references kullanici_tanim(id),
   -- Gerçekleşen
   baslangic timestamptz,
   bitis timestamptz,
@@ -491,6 +509,7 @@ alter table depo_hareket       enable row level security;
 alter table satinalma_siparis  enable row level security;
 alter table satinalma_kalem    enable row level security;
 alter table makine_tanim       enable row level security;
+alter table fason_fiyat        enable row level security;
 alter table proje              enable row level security;
 alter table proje_katman       enable row level security;
 alter table proje_fiyat        enable row level security;
@@ -504,7 +523,7 @@ do $$ declare t text; begin
   foreach t in array array[
     'kullanici_tanim','musteri_tanim','tedarikci_tanim',
     'malzeme_tanim','malzeme_fiyat','depo_stok','depo_hareket',
-    'satinalma_siparis','satinalma_kalem','makine_tanim',
+    'satinalma_siparis','satinalma_kalem','makine_tanim','fason_fiyat',
     'proje','proje_katman','proje_fiyat','proforma',
     'uretim_plani','uretim_adim','sevkiyat'
   ] loop
@@ -520,3 +539,11 @@ create sequence if not exists proforma_no_seq start 1;
 create sequence if not exists po_no_seq start 1;
 create sequence if not exists sevk_no_seq start 1;
 create sequence if not exists plan_no_seq start 1;
+
+-- Uygulama kodu (lib/supabase.ts) numara üretmek icin
+-- supabase.rpc('nextval', { sequence_name: '...' }) cagiriyor;
+-- bu fonksiyon olmadan cagri sessizce basarisiz olur.
+create or replace function nextval(sequence_name text) returns bigint
+language sql security definer as $$
+  select nextval(sequence_name::regclass)
+$$;

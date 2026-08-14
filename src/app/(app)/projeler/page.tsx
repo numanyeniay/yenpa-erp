@@ -9,7 +9,7 @@ const DURUM_BADGE: Record<string, string> = {
   fiyatlama: 'badge-blue',
   proforma_gonderildi: 'badge-amber',
   musteri_onayladi: 'badge-green',
-  'uretimdе': 'badge-purple',
+  'uretimde': 'badge-purple',
   tamamlandi: 'badge-green',
   iptal: 'badge-red',
 }
@@ -19,7 +19,7 @@ const DURUM_LABEL: Record<string, string> = {
   fiyatlama: 'Fiyatlama',
   proforma_gonderildi: 'Proforma Gonderildi',
   musteri_onayladi: 'Musteri Onayladi',
-  'uretimdе': 'Uretimde',
+  'uretimde': 'Uretimde',
   tamamlandi: 'Tamamlandi',
   iptal: 'Iptal',
 }
@@ -54,7 +54,7 @@ export default function ProjelerPage() {
     toplam: projeler.length,
     taslak: projeler.filter(p => p.durum === 'taslak').length,
     onaylandi: projeler.filter(p => p.durum === 'musteri_onayladi').length,
-    uretimde: projeler.filter(p => p.durum === 'uretimdе').length,
+    uretimde: projeler.filter(p => p.durum === 'uretimde').length,
   }
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>

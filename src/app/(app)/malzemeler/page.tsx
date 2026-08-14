@@ -6,27 +6,53 @@ export default function MalzemellerPage() {
   const [malzemeler, setMalzemeler] = useState<any[]>([])
   const [fiyatlar, setFiyatlar] = useState<any[]>([])
   const [tedarikciler, setTedarikciler] = useState<any[]>([])
+  const [fasonFiyatlar, setFasonFiyatlar] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'malzeme'|'fiyat'|'tedarikci'>('malzeme')
+  const [tab, setTab] = useState<'malzeme'|'fiyat'|'tedarikci'|'fason'>('malzeme')
   const [yeniFiyat, setYeniFiyat] = useState({malzeme_id:'', tedarikci_id:'', mikron:'0', birim_fiyat:'', para_birimi:'USD'})
-  const [yeniMalzeme, setYeniMalzeme] = useState({ad:'', tur:'OPP', yogunluk:''})
+  const [yeniMalzeme, setYeniMalzeme] = useState({ad:'', tur:'OPP', yogunluk:'', min_stok_kg:''})
   const [yeniTedarikci, setYeniTedarikci] = useState({ad:'', ulke:'Turkiye', para_birimi:'USD', odeme_vadesi_gun:'30'})
+  const [yeniFason, setYeniFason] = useState({tur:'doypack', min_gram:'', max_gram:'', birim_fiyat_kg:''})
   const [duzenle, setDuzenle] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
   const MALZEME_TURLERI = ['OPP','BOPP','PET','CPP','LDPE','MDPE','ALU','MOPP','MPET','MATOPP','SEDEF_OPP','OPAK_OPP','PA','KAGIT','BOYA','TUTKAL','SOLVENT','ZIP','DIGER']
+  const FASON_TURLERI = ['doypack','quadro','flat_bottom','sirt_kaynak']
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data:m },{ data:f },{ data:t }] = await Promise.all([
+    const [{ data:m },{ data:f },{ data:t },{ data:ff }] = await Promise.all([
       supabase.from('malzeme_tanim').select('*').order('ad'),
       supabase.from('malzeme_fiyat').select('*, malzeme:malzeme_tanim(ad,tur), tedarikci:tedarikci_tanim(ad)').order('gecerlilik_tarihi', {ascending:false}),
       supabase.from('tedarikci_tanim').select('*').order('ad'),
+      supabase.from('fason_fiyat').select('*').order('tur').order('min_gram'),
     ])
-    setMalzemeler(m||[]); setFiyatlar(f||[]); setTedarikciler(t||[])
+    setMalzemeler(m||[]); setFiyatlar(f||[]); setTedarikciler(t||[]); setFasonFiyatlar(ff||[])
     setLoading(false)
+  }
+
+  async function fasonEkle() {
+    setSaving(true); setMsg('')
+    if (!yeniFason.min_gram || !yeniFason.birim_fiyat_kg) { setMsg('Min gram ve fiyat zorunlu.'); setSaving(false); return }
+    const { error } = await supabase.from('fason_fiyat').insert({
+      tur: yeniFason.tur,
+      min_gram: parseFloat(yeniFason.min_gram),
+      max_gram: yeniFason.max_gram ? parseFloat(yeniFason.max_gram) : null,
+      birim_fiyat_kg: parseFloat(yeniFason.birim_fiyat_kg),
+      aktif: true,
+    })
+    if (error) { setMsg('Hata: ' + error.message); setSaving(false); return }
+    setMsg('Fason fiyat kademesi eklendi.'); load()
+    setYeniFason({ tur: 'doypack', min_gram: '', max_gram: '', birim_fiyat_kg: '' })
+    setSaving(false)
+  }
+
+  async function fasonSil(id: string) {
+    if (!confirm('Bu fason fiyat kademesini silmek istediginizden emin misiniz?')) return
+    await supabase.from('fason_fiyat').update({ aktif: false }).eq('id', id)
+    load()
   }
 
   async function fiyatEkle() {
@@ -58,10 +84,11 @@ export default function MalzemellerPage() {
     await supabase.from('malzeme_tanim').insert({
       kod: yeniMalzeme.tur+'-'+(((count||0)+1)+'').padStart(3,'0'),
       ad: yeniMalzeme.ad, tur: yeniMalzeme.tur,
-      yogunluk: parseFloat(yeniMalzeme.yogunluk)||null, aktif:true,
+      yogunluk: parseFloat(yeniMalzeme.yogunluk)||null,
+      min_stok_kg: parseFloat(yeniMalzeme.min_stok_kg)||null, aktif:true,
     })
     setMsg('Malzeme eklendi.'); load()
-    setYeniMalzeme({ad:'',tur:'OPP',yogunluk:''})
+    setYeniMalzeme({ad:'',tur:'OPP',yogunluk:'',min_stok_kg:''})
     setSaving(false)
   }
 
@@ -71,6 +98,7 @@ export default function MalzemellerPage() {
     await supabase.from('malzeme_tanim').update({
       ad: duzenle.ad, tur: duzenle.tur,
       yogunluk: parseFloat(duzenle.yogunluk)||null,
+      min_stok_kg: parseFloat(duzenle.min_stok_kg)||null,
     }).eq('id', duzenle.id)
     setDuzenle(null); load(); setSaving(false)
     setMsg('Malzeme guncellendi.')
@@ -123,6 +151,7 @@ export default function MalzemellerPage() {
           {k:'fiyat', l:'Fiyat listesi'},
           {k:'malzeme', l:'Malzemeler'},
           {k:'tedarikci', l:'Tedarikciler'},
+          {k:'fason', l:'Fason Fiyatlar'},
         ].map(t => (
           <button key={t.k} onClick={()=>{setTab(t.k as any);setMsg('');setDuzenle(null)}}
             className={`px-5 py-2.5 text-sm border-b-2 -mb-px transition-colors ${tab===t.k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -218,6 +247,10 @@ export default function MalzemellerPage() {
                     <label>Yogunluk (g/cm3)</label>
                     <input type="number" step="0.001" value={duzenle.yogunluk||''} onChange={e=>setDuzenle((p:any)=>({...p,yogunluk:e.target.value}))} />
                   </div>
+                  <div>
+                    <label>Kritik stok esigi (kg)</label>
+                    <input type="number" step="0.1" value={duzenle.min_stok_kg||''} onChange={e=>setDuzenle((p:any)=>({...p,min_stok_kg:e.target.value}))} placeholder="Bos = uyari yok" />
+                  </div>
                 </div>
                 <div className="flex gap-3 mt-5">
                   <button onClick={malzemeGuncelle} disabled={saving} className="btn btn-primary flex-1 justify-center">Kaydet</button>
@@ -230,7 +263,7 @@ export default function MalzemellerPage() {
           <div className="card">
             <div className="card-header"><span className="font-medium text-sm">Yeni malzeme ekle</span></div>
             <div className="card-body">
-              <div className="grid grid-cols-4 gap-3 items-end">
+              <div className="grid grid-cols-5 gap-3 items-end">
                 <div className="col-span-2">
                   <label>Malzeme adi</label>
                   <input value={yeniMalzeme.ad} onChange={e=>setYeniMalzeme(p=>({...p,ad:e.target.value}))} placeholder="OPP 20mic Seffaf" />
@@ -245,6 +278,10 @@ export default function MalzemellerPage() {
                   <label>Yogunluk (g/cm3)</label>
                   <input type="number" step="0.001" value={yeniMalzeme.yogunluk} onChange={e=>setYeniMalzeme(p=>({...p,yogunluk:e.target.value}))} placeholder="0.910" />
                 </div>
+                <div>
+                  <label>Kritik stok esigi (kg)</label>
+                  <input type="number" step="0.1" value={yeniMalzeme.min_stok_kg} onChange={e=>setYeniMalzeme(p=>({...p,min_stok_kg:e.target.value}))} placeholder="Opsiyonel" />
+                </div>
               </div>
               {msg && <p className={`text-sm mt-2 ${msg.startsWith('Hata')?'text-red-600':'text-green-600'}`}>{msg}</p>}
               <button onClick={malzemeEkle} disabled={saving} className="btn btn-primary mt-3">Malzeme ekle</button>
@@ -253,13 +290,14 @@ export default function MalzemellerPage() {
 
           <div className="card p-0 overflow-hidden">
             <table className="table-base">
-              <thead><tr><th>Ad</th><th>Tur</th><th>Yogunluk</th><th>Durum</th><th>Islem</th></tr></thead>
+              <thead><tr><th>Ad</th><th>Tur</th><th>Yogunluk</th><th>Kritik stok</th><th>Durum</th><th>Islem</th></tr></thead>
               <tbody>
                 {malzemeler.map(m=>(
                   <tr key={m.id}>
                     <td className="font-medium">{m.ad}</td>
                     <td><span className="badge badge-blue">{m.tur}</span></td>
                     <td className="text-gray-500">{m.yogunluk ? m.yogunluk+' g/cm3' : '—'}</td>
+                    <td className="text-gray-500">{m.min_stok_kg ? m.min_stok_kg+' kg' : '—'}</td>
                     <td><span className={`badge ${m.aktif?'badge-green':'badge-gray'}`}>{m.aktif?'Aktif':'Pasif'}</span></td>
                     <td>
                       <div className="flex gap-2">
@@ -324,6 +362,61 @@ export default function MalzemellerPage() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* FASON FIYATLAR */}
+      {tab === 'fason' && (
+        <div className="space-y-4">
+          <div className="card">
+            <div className="card-header"><span className="font-medium text-sm">Yeni fason fiyat kademesi ekle</span></div>
+            <div className="card-body">
+              <div className="grid grid-cols-4 gap-3 items-end">
+                <div>
+                  <label>Cikti turu</label>
+                  <select value={yeniFason.tur} onChange={e=>setYeniFason(p=>({...p,tur:e.target.value}))}>
+                    {FASON_TURLERI.map(t=><option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label>Min gram (adet basi)</label>
+                  <input type="number" step="0.01" value={yeniFason.min_gram} onChange={e=>setYeniFason(p=>({...p,min_gram:e.target.value}))} placeholder="0" />
+                </div>
+                <div>
+                  <label>Max gram (bos = sinirsiz)</label>
+                  <input type="number" step="0.01" value={yeniFason.max_gram} onChange={e=>setYeniFason(p=>({...p,max_gram:e.target.value}))} />
+                </div>
+                <div>
+                  <label>Fiyat ($/kg)</label>
+                  <input type="number" step="0.0001" value={yeniFason.birim_fiyat_kg} onChange={e=>setYeniFason(p=>({...p,birim_fiyat_kg:e.target.value}))} />
+                </div>
+              </div>
+              {msg && <p className={`text-sm mt-2 ${msg.startsWith('Hata')?'text-red-600':'text-green-600'}`}>{msg}</p>}
+              <button onClick={fasonEkle} disabled={saving} className="btn btn-primary mt-3">Kademe ekle</button>
+            </div>
+          </div>
+
+          <div className="card p-0 overflow-hidden">
+            <table className="table-base">
+              <thead><tr><th>Cikti turu</th><th>Gram araligi</th><th>Fiyat ($/kg)</th><th>Durum</th><th>Islem</th></tr></thead>
+              <tbody>
+                {fasonFiyatlar.map(f=>(
+                  <tr key={f.id}>
+                    <td className="font-medium">{f.tur}</td>
+                    <td className="text-gray-500">{f.min_gram}g – {f.max_gram ?? '∞'}g</td>
+                    <td className="font-semibold text-green-700">${Number(f.birim_fiyat_kg).toFixed(4)}</td>
+                    <td><span className={`badge ${f.aktif?'badge-green':'badge-gray'}`}>{f.aktif?'Aktif':'Pasif'}</span></td>
+                    <td>
+                      {f.aktif && (
+                        <button onClick={()=>fasonSil(f.id)} className="btn btn-sm btn-danger">Pasife al</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {fasonFiyatlar.length===0 && <tr><td colSpan={5} className="text-center text-gray-400 py-8">Henuz fason fiyat kademesi yok</td></tr>}
               </tbody>
             </table>
           </div>

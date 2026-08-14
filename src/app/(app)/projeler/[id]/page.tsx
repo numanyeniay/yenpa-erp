@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, KAZAN_CAPLARI, fotoselHesapla, type FiyatGirdisi } from '@/lib/fiyatlama'
+import { yeniProformaNo } from '@/lib/supabase'
 
 const DURUM_BADGE: Record<string,string> = {
   taslak:'badge-gray', fiyatlama:'badge-blue',
@@ -47,6 +48,8 @@ export default function ProjeDetayPage() {
   const [hesaplanan, setHesaplanan] = useState<any[]>([])
   const [kaydediliyor, setKaydediliyor] = useState(false)
   const [msg, setMsg] = useState('')
+  const [proformalar, setProformalar] = useState<any[]>([])
+  const [proformaOlusturuluyor, setProformaOlusturuluyor] = useState<string | null>(null)
 
   // Fiyat parametreleri
   const [hamBobin, setHamBobin] = useState('')
@@ -62,20 +65,44 @@ export default function ProjeDetayPage() {
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: p }, { data: k }, { data: t }, { data: mf }, { data: ff }] = await Promise.all([
+    const [{ data: p }, { data: k }, { data: t }, { data: mf }, { data: ff }, { data: pr }] = await Promise.all([
       supabase.from('proje').select('*, musteri:musteri_tanim(ad,para_birimi)').eq('id', id).single(),
       supabase.from('proje_katman').select('*, malzeme:malzeme_tanim(ad,tur,yogunluk)').eq('proje_id', id).order('sira'),
       supabase.from('proje_fiyat').select('*').eq('proje_id', id).order('olusturma', {ascending:false}),
       supabase.from('malzeme_fiyat').select('*, malzeme:malzeme_tanim(id,tur)').order('gecerlilik_tarihi', {ascending:false}),
       supabase.from('fason_fiyat').select('*').eq('aktif', true).order('tur').order('min_gram'),
+      supabase.from('proforma').select('*').eq('proje_id', id).order('olusturma', {ascending:false}),
     ])
     setProje(p)
     setKatmanlar(k || [])
     setTeklifler(t || [])
     setMalzemeFiyatlari(mf || [])
     setFasonFiyatlar(ff || [])
+    setProformalar(pr || [])
     if (p?.kato_eni_mm) setHamBobin(String(p.kato_eni_mm))
     setLoading(false)
+  }
+
+  async function proformaOlustur(f: any) {
+    setProformaOlusturuluyor(f.id)
+    const proforma_no = await yeniProformaNo()
+    const gecerlilik = new Date()
+    gecerlilik.setDate(gecerlilik.getDate() + 14)
+    const { data, error } = await supabase.from('proforma').insert({
+      proforma_no, proje_id: id, musteri_id: proje.musteri_id,
+      secilen_miktar_kg: f.miktar_kg,
+      satis_fiyati_kg: f.satis_fiyati_kg,
+      para_birimi: (proje.musteri as any)?.para_birimi || 'USD',
+      toplam_tutar: f.satis_fiyati_kg * f.miktar_kg,
+      gecerlilik_tarihi: gecerlilik.toISOString().split('T')[0],
+      durum: 'gonderildi',
+    }).select().single()
+    setProformaOlusturuluyor(null)
+    if (error || !data) { setMsg('Proforma olusturulamadi: ' + error?.message); return }
+    if (proje.durum === 'taslak' || proje.durum === 'fiyatlama') {
+      await supabase.from('proje').update({ durum: 'proforma_gonderildi' }).eq('id', id)
+    }
+    router.push(`/proforma/${data.id}`)
   }
 
   function sonFiyatBul(malzeme_id: string): number {
@@ -301,6 +328,7 @@ export default function ProjeDetayPage() {
                       <th>m² fiyati</th>
                       <th>Kar marji</th>
                       <th>Tarih</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -314,6 +342,11 @@ export default function ProjeDetayPage() {
                         <td className="text-gray-600">${parseFloat(f.satis_fiyati_m2 || 0).toFixed(4)}</td>
                         <td>%{f.kar_marji_pct}</td>
                         <td className="text-gray-400 text-xs">{new Date(f.olusturma).toLocaleDateString('tr-TR')}</td>
+                        <td>
+                          <button onClick={() => proformaOlustur(f)} disabled={proformaOlusturuluyor === f.id} className="btn btn-sm btn-primary">
+                            {proformaOlusturuluyor === f.id ? '...' : 'Proforma olustur'}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -321,6 +354,24 @@ export default function ProjeDetayPage() {
               </div>
             )}
           </div>
+
+          {proformalar.length > 0 && (
+            <div className="card">
+              <div className="card-header"><span className="font-medium text-sm">Olusturulan proformalar</span></div>
+              <div>
+                {proformalar.map(pf => (
+                  <Link key={pf.id} href={`/proforma/${pf.id}`}
+                    className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 no-underline">
+                    <div>
+                      <span className="font-mono text-sm font-medium text-blue-700">{pf.proforma_no}</span>
+                      <span className="text-xs text-gray-500 ml-2">{Number(pf.secilen_miktar_kg).toLocaleString('tr-TR')} kg · ${Number(pf.toplam_tutar).toFixed(2)}</span>
+                    </div>
+                    <span className={`badge ${pf.durum === 'onaylandi' ? 'badge-green' : pf.durum === 'reddedildi' ? 'badge-red' : 'badge-amber'}`}>{pf.durum}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sag panel - Durum */}

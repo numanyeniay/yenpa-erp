@@ -13,7 +13,7 @@ export type AdimTur =
 
 export type ProjeDurum =
   'taslak'|'fiyatlama'|'proforma_gonderildi'|
-  'musteri_onayladi'|'uretimdе'|'tamamlandi'|'iptal'
+  'musteri_onayladi'|'uretimde'|'tamamlandi'|'iptal'
 
 export type MalzemeTur =
   'OPP'|'BOPP'|'PET'|'CPP'|'LDPE'|'MDPE'|'HDPE'|
@@ -48,6 +48,9 @@ export interface MalzemeTanim {
   ad: string
   tur: MalzemeTur
   yogunluk?: number
+  min_mikron?: number
+  max_mikron?: number
+  min_stok_kg?: number
   aktif: boolean
 }
 
@@ -174,6 +177,7 @@ export interface UretimAdim {
   plan_id: string
   proje_id: string
   makine_id: string
+  operator_id?: string
   baslangic?: string
   bitis?: string
   sure_dk?: number
@@ -219,6 +223,9 @@ export function projeRotasiHesapla(proje: Partial<Proje>, katmanlar: ProjeKatman
   return adimlar
 }
 
+// Sırt kaynak bindirme payı: standart olarak her taraftan 1 cm (toplam 2 cm / 20mm)
+export const SIRT_KAYNAK_BINDIRME_MM = 10 // her taraftan; kato eninde 2x eklenir
+
 // Ebat hesaplama
 export function katoEniHesapla(proje: Partial<Proje>): number {
   const enMm = proje.en_mm || 0
@@ -228,7 +235,7 @@ export function katoEniHesapla(proje: Partial<Proje>): number {
   const cikti = proje.cikti_turu
 
   if (cikti === 'bobin') return proje.bobin_en_mm || enMm
-  if (cikti === 'sirt_kaynak') return boyMm * 2  // boy × 2 yüzey
+  if (cikti === 'sirt_kaynak') return (enMm * 2) + (SIRT_KAYNAK_BINDIRME_MM * 2)  // en×2 + bindirme (her taraftan 1cm)
   if (cikti === 'doypack' || cikti === 'flat_bottom') return boyMm * 2 + kurekMm  // boy×2 + körük
   if (cikti === 'quadro') return (enMm * 2) + (kurekMm * 2)  // en×2 + körük×2
   if (cikti === 'yan_kesim' || cikti === 'katlama_torba') return (enMm + kurekMm) * (proje.yan_yana_baski || 1)

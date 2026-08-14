@@ -3,6 +3,8 @@
 // Excel referans: YENPA_EN_YENI_MALIYET.xlsx
 // ============================================================
 
+import { SIRT_KAYNAK_BINDIRME_MM } from '@/types'
+
 // Kazan çapları (mm)
 export const KAZAN_CAPLARI = [350,380,400,420,450,480,500,520,550,560,580,600,620,640,660]
 
@@ -271,8 +273,13 @@ export function adetAgirligiHesapla(params: {
     alan_cm2 = ((en_cm * 2) + (kurek_cm * 2)) * boy_cm
   } else if (ct === 'flat_bottom') {
     alan_cm2 = (boy_cm * 2 + kurek_cm) * (en_cm + kurek_cm)
+  } else if (ct === 'sirt_kaynak') {
+    // Kato eni = en×2 + bindirme (her taraftan 1cm, toplam 2cm) — bkz. types/katoEniHesapla
+    // Alan = kato eni × boy
+    const bindirme_cm = 2 * (SIRT_KAYNAK_BINDIRME_MM / 10) // mm -> cm, her iki taraf
+    alan_cm2 = (en_cm * 2 + bindirme_cm) * boy_cm
   } else {
-    // Sırt kaynak, yan kesim
+    // Yan kesim ve diğerleri
     alan_cm2 = en_cm * boy_cm * 2
   }
 

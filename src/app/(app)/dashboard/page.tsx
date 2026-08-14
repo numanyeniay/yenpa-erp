@@ -19,7 +19,7 @@ export default function DashboardPage() {
         { data: kritikStok },
       ] = await Promise.all([
         supabase.from('proje').select('*', { count:'exact', head:true }),
-        supabase.from('proje').select('*', { count:'exact', head:true }).eq('durum','uretimdе'),
+        supabase.from('proje').select('*', { count:'exact', head:true }).eq('durum','uretimde'),
         supabase.from('proje').select('*, musteri:musteri_tanim(ad)').order('olusturma', { ascending:false }).limit(5),
         supabase.from('uretim_plani').select('*, proje(proje_no,ad), makine:makine_tanim(ad)').eq('durum','bekliyor').limit(5),
         supabase.from('depo_stok').select('*, malzeme:malzeme_tanim(ad,min_stok_kg)').limit(100),
