@@ -263,13 +263,14 @@ export function adetAgirligiHesapla(params: {
   const ct = params.cikti_turu
 
   if (ct === 'doypack') {
-    // Ön + arka + alt körük
-    alan_cm2 = (en_cm * boy_cm * 2) + (en_cm * kurek_cm / 2)
+    // Kato eni = boy*2 + körük, ürün eni = en + körük
+    // Alan = (boy*2 + körük) × (en + körük)
+    alan_cm2 = (boy_cm * 2 + kurek_cm) * (en_cm + kurek_cm)
   } else if (ct === 'quadro') {
-    // Ön + arka + iki yan körük
-    alan_cm2 = (en_cm * boy_cm * 2) + (kurek_cm * boy_cm * 2)
+    // (en×2 + körük×2) × boy
+    alan_cm2 = ((en_cm * 2) + (kurek_cm * 2)) * boy_cm
   } else if (ct === 'flat_bottom') {
-    alan_cm2 = (en_cm * boy_cm * 2) + (en_cm * kurek_cm / 2) + (kurek_cm * kurek_cm)
+    alan_cm2 = (boy_cm * 2 + kurek_cm) * (en_cm + kurek_cm)
   } else {
     // Sırt kaynak, yan kesim
     alan_cm2 = en_cm * boy_cm * 2
