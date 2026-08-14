@@ -3,38 +3,36 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
-import { fiyatHesapla } from '@/lib/supabase'
+import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, KAZAN_CAPLARI, fotoselHesapla, type FiyatGirdisi } from '@/lib/fiyatlama'
 
 const DURUM_BADGE: Record<string,string> = {
   taslak:'badge-gray', fiyatlama:'badge-blue',
   proforma_gonderildi:'badge-amber', musteri_onayladi:'badge-green',
   tamamlandi:'badge-green', iptal:'badge-red'
 }
-
 const DURUM_LABEL: Record<string,string> = {
   taslak:'Taslak', fiyatlama:'Fiyatlama',
   proforma_gonderildi:'Proforma Gonderildi', musteri_onayladi:'Musteri Onayladi',
   tamamlandi:'Tamamlandi', iptal:'Iptal'
 }
-
 const ADIM_RENK: Record<string,string> = {
-  baski:'bg-blue-100 text-blue-800', laminasyon_1:'bg-teal-100 text-teal-800',
-  laminasyon_2:'bg-teal-100 text-teal-800', laminasyon_3:'bg-teal-100 text-teal-800',
-  kurleme_1:'bg-amber-100 text-amber-800', kurleme_2:'bg-amber-100 text-amber-800',
-  kurleme_3:'bg-amber-100 text-amber-800', dilimleme:'bg-green-100 text-green-800',
-  katlama:'bg-purple-100 text-purple-800', yan_kesim:'bg-red-100 text-red-800',
-  doypack:'bg-gray-100 text-gray-700', quadro:'bg-gray-100 text-gray-700',
-  flat_bottom:'bg-gray-100 text-gray-700', sirt_kaynak:'bg-gray-100 text-gray-700',
-  sonic:'bg-pink-100 text-pink-800',
+  baski:'bg-blue-100 text-blue-800',
+  laminasyon_1:'bg-teal-100 text-teal-800', laminasyon_2:'bg-teal-100 text-teal-800', laminasyon_3:'bg-teal-100 text-teal-800',
+  kurleme_1:'bg-amber-100 text-amber-800', kurleme_2:'bg-amber-100 text-amber-800', kurleme_3:'bg-amber-100 text-amber-800',
+  dilimleme:'bg-green-100 text-green-800', katlama:'bg-purple-100 text-purple-800',
+  yan_kesim:'bg-red-100 text-red-800', doypack:'bg-gray-100 text-gray-700',
+  quadro:'bg-gray-100 text-gray-700', flat_bottom:'bg-gray-100 text-gray-700',
+  sirt_kaynak:'bg-gray-100 text-gray-700', sonic:'bg-pink-100 text-pink-800',
+}
+const ADIM_LABEL: Record<string,string> = {
+  baski:'Baski', laminasyon_1:'Laminasyon 1', laminasyon_2:'Laminasyon 2', laminasyon_3:'Laminasyon 3',
+  kurleme_1:'Kurleme 1 (24-48 saat)', kurleme_2:'Kurleme 2 (24-48 saat)', kurleme_3:'Kurleme 3 (24-48 saat)',
+  dilimleme:'Dilimleme', katlama:'Katlama', yan_kesim:'Yan Kesim',
+  doypack:'Doypack (Fason)', quadro:'Quadro (Fason)', flat_bottom:'Flat Bottom (Fason)',
+  sirt_kaynak:'Sirt Kaynak (Fason)', sonic:'Sonic',
 }
 
-const ADIM_LABEL: Record<string,string> = {
-  baski:'Baski', laminasyon_1:'Laminasyon 1', laminasyon_2:'Laminasyon 2',
-  laminasyon_3:'Laminasyon 3', kurleme_1:'Kurleme 1', kurleme_2:'Kurleme 2',
-  kurleme_3:'Kurleme 3', dilimleme:'Dilimleme', katlama:'Katlama',
-  yan_kesim:'Yan Kesim', doypack:'Doypack (Fason)', quadro:'Quadro (Fason)',
-  flat_bottom:'Flat Bottom (Fason)', sirt_kaynak:'Sirt Kaynak (Fason)', sonic:'Sonic',
-}
+const MIKTARLAR = [500, 1000, 3000]
 
 export default function ProjeDetayPage() {
   const { id } = useParams()
@@ -43,86 +41,135 @@ export default function ProjeDetayPage() {
   const [katmanlar, setKatmanlar] = useState<any[]>([])
   const [teklifler, setTeklifler] = useState<any[]>([])
   const [malzemeFiyatlari, setMalzemeFiyatlari] = useState<any[]>([])
+  const [fasonFiyatlar, setFasonFiyatlar] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [fiyatModal, setFiyatModal] = useState(false)
-  const [durumGuncelleniyor, setDurumGuncelleniyor] = useState(false)
-
-  // Fiyatlama formu
-  const [fiyatForm, setFiyatForm] = useState({
-    boya_fiyat: '6.00',
-    tutkal_fiyat: '6.50',
-    iscilik: '0.50',
-    fire_pct: '3',
-    kar_pct: '20',
-    fason_maliyet: '0',
-  })
-  const [hesaplananFiyatlar, setHesaplananFiyatlar] = useState<any[]>([])
-  const [fiyatKaydediliyor, setFiyatKaydediliyor] = useState(false)
+  const [hesaplanan, setHesaplanan] = useState<any[]>([])
+  const [kaydediliyor, setKaydediliyor] = useState(false)
   const [msg, setMsg] = useState('')
+
+  // Fiyat parametreleri
+  const [hamBobin, setHamBobin] = useState('')
+  const [netEn, setNetEn] = useState('')
+  const [baslangicFire, setBaslangicFire] = useState('50')
+  const [kazanCap, setKazanCap] = useState('')
+  const [otomatikKazan, setOtomatikKazan] = useState(true)
+  const [boyaFiyat, setBoyaFiyat] = useState('4.50')
+  const [tutkalFiyat, setTutkalFiyat] = useState('4.50')
+  const [iscilik, setIscilik] = useState('0.50')
+  const [karPct, setKarPct] = useState('25')
 
   useEffect(() => { load() }, [id])
 
   async function load() {
-    const [{ data: p }, { data: k }, { data: t }, { data: mf }] = await Promise.all([
+    const [{ data: p }, { data: k }, { data: t }, { data: mf }, { data: ff }] = await Promise.all([
       supabase.from('proje').select('*, musteri:musteri_tanim(ad,para_birimi)').eq('id', id).single(),
       supabase.from('proje_katman').select('*, malzeme:malzeme_tanim(ad,tur,yogunluk)').eq('proje_id', id).order('sira'),
       supabase.from('proje_fiyat').select('*').eq('proje_id', id).order('olusturma', {ascending:false}),
-      supabase.from('malzeme_fiyat').select('*, malzeme:malzeme_tanim(id,ad)').order('gecerlilik_tarihi', {ascending:false}),
+      supabase.from('malzeme_fiyat').select('*, malzeme:malzeme_tanim(id,tur)').order('gecerlilik_tarihi', {ascending:false}),
+      supabase.from('fason_fiyat').select('*').eq('aktif', true).order('tur').order('min_gram'),
     ])
-    setProje(p); setKatmanlar(k||[]); setTeklifler(t||[]); setMalzemeFiyatlari(mf||[])
+    setProje(p)
+    setKatmanlar(k || [])
+    setTeklifler(t || [])
+    setMalzemeFiyatlari(mf || [])
+    setFasonFiyatlar(ff || [])
+    if (p?.kato_eni_mm) setHamBobin(String(p.kato_eni_mm))
     setLoading(false)
   }
 
-  function sonFiyatBul(malzeme_id: string) {
-    return malzemeFiyatlari.find(f => f.malzeme_id === malzeme_id)?.birim_fiyat || 0
+  function sonFiyatBul(malzeme_id: string): number {
+    return parseFloat(malzemeFiyatlari.find(f => f.malzeme_id === malzeme_id)?.birim_fiyat || '0')
   }
 
-  function hesaplaFiyatlar() {
-    const laminasyonSayisi = katmanlar.filter(k => k.laminasyon_onceki).length
+  function laminasyonSayisi(): number {
+    return katmanlar.filter(k => k.laminasyon_onceki).length
+  }
+
+  function mamulKgM2(): number {
     const baskili = katmanlar.some(k => k.baskili)
+    const filmGm2 = katmanlar.reduce((s, k) => s + (k.mikron * (k.malzeme?.yogunluk || 0.92)), 0)
+    const boyaGm2 = baskili ? 2.2 : 0
+    const tutkalGm2 = laminasyonSayisi() * 2.0
+    return (filmGm2 + boyaGm2 + tutkalGm2) / 1000
+  }
+
+  function fasonCiktiTuru(): string | null {
+    const ct = proje?.cikti_turu
+    if (['doypack','quadro','flat_bottom','sirt_kaynak'].includes(ct)) return ct
+    return null
+  }
+
+  function hesaplaAdetGram(): number {
+    if (!proje) return 0
+    return adetAgirligiHesapla({
+      cikti_turu: proje.cikti_turu,
+      en_mm: proje.en_mm || 0,
+      boy_mm: proje.boy_mm || 0,
+      kurek_mm: proje.kurek_mm || 0,
+      mamul_kg_m2: mamulKgM2(),
+      zip_var: proje.zip_var || false,
+    })
+  }
+
+  function hesapla() {
+    if (!netEn || !hamBobin) { setMsg('Ham bobin eni ve net kullanilabilir en giriniz.'); return }
+    setMsg('')
+
+    const lam = laminasyonSayisi()
+    const baskili = katmanlar.some(k => k.baskili)
+    const adetGram = hesaplaAdetGram()
+    const fasonTur = fasonCiktiTuru()
+    const fasonBirimFiyat = fasonTur
+      ? fasonFiyatBul(fasonTur, adetGram, fasonFiyatlar)
+      : 0
 
     const katmanGirdileri = katmanlar.map(k => ({
-      malzeme_id: k.malzeme_id,
+      malzeme_adi: k.malzeme?.ad || '',
+      malzeme_tur: k.malzeme?.tur || '',
       mikron: k.mikron,
-      yogunluk: k.malzeme?.yogunluk || 0.91,
+      yogunluk: k.malzeme?.yogunluk || 0.92,
       birim_fiyat: sonFiyatBul(k.malzeme_id),
+      baskili: k.baskili,
     }))
 
-    const sonuclar = [500, 1000, 3000].map(miktar => {
-      const sonuc = fiyatHesapla({
+    const sonuclar = MIKTARLAR.map(miktar => {
+      const girdi: FiyatGirdisi = {
         katmanlar: katmanGirdileri,
-        baskili,
-        renk_sayisi: proje?.renk_sayisi || 1,
-        laminasyon_sayisi: laminasyonSayisi,
+        laminasyon_sayisi: lam,
         siparis_kg: miktar,
-        boya_fiyat_kg: parseFloat(fiyatForm.boya_fiyat),
-        tutkal_fiyat_kg: parseFloat(fiyatForm.tutkal_fiyat),
-        iscilik_kg: parseFloat(fiyatForm.iscilik),
-        fire_pct: parseFloat(fiyatForm.fire_pct),
-        kar_pct: parseFloat(fiyatForm.kar_pct),
-        fason_maliyet: parseFloat(fiyatForm.fason_maliyet) || 0,
-        makine_hazirlik_kg: miktar <= 500 ? 15 : miktar <= 1000 ? 10 : 5,
-      })
-      return { miktar, ...sonuc }
+        bobin_en_mm: parseFloat(hamBobin),
+        kullanilabilir_en_mm: parseFloat(netEn),
+        kenar_tirasi_mm: (parseFloat(hamBobin) - parseFloat(netEn)) / 2,
+        boya_fiyat_kg: parseFloat(boyaFiyat),
+        tutkal_fiyat_kg: parseFloat(tutkalFiyat),
+        iscilik_kg: parseFloat(iscilik),
+        baslangic_fire_kg: parseFloat(baslangicFire),
+        kar_pct: parseFloat(karPct),
+        fason_birim_fiyat_kg: fasonBirimFiyat,
+      }
+      const sonuc = hesaplaFiyat(girdi)
+      return { miktar, adet_gram: adetGram, fason_birim_fiyat: fasonBirimFiyat, ...sonuc }
     })
-    setHesaplananFiyatlar(sonuclar)
+    setHesaplanan(sonuclar)
   }
 
-  async function fiyatKaydet() {
-    if (hesaplananFiyatlar.length === 0) { setMsg('Once hesapla butonuna basin.'); return }
-    setFiyatKaydediliyor(true)
-    for (const f of hesaplananFiyatlar) {
+  async function kaydet() {
+    if (hesaplanan.length === 0) return
+    setKaydediliyor(true)
+    for (const f of hesaplanan) {
       await supabase.from('proje_fiyat').insert({
         proje_id: id,
         miktar_kg: f.miktar,
-        film_maliyet: f.film_maliyet,
-        boya_maliyet: f.boya_maliyet,
-        tutkal_maliyet: f.tutkal_maliyet,
-        iscilik_maliyet: f.iscilik_maliyet,
-        fason_maliyet: f.fason_maliyet,
-        fire_orani_pct: parseFloat(fiyatForm.fire_pct),
-        toplam_maliyet: f.satis_fiyati,
-        kar_marji_pct: parseFloat(fiyatForm.kar_pct),
+        film_maliyet: f.film_tutar,
+        boya_maliyet: f.boya_tutar,
+        tutkal_maliyet: f.tutkal_tutar,
+        iscilik_maliyet: f.iscilik_tutar,
+        fason_maliyet: f.fason_tutar,
+        fire_orani_pct: f.kenar_fire_pct,
+        baslangic_fire_kg: parseFloat(baslangicFire),
+        toplam_maliyet: f.toplam_maliyet,
+        kar_marji_pct: parseFloat(karPct),
         satis_fiyati_kg: f.satis_fiyati_kg,
         satis_fiyati_m2: f.satis_fiyati_m2,
         para_birimi: proje?.musteri?.para_birimi || 'USD',
@@ -130,100 +177,44 @@ export default function ProjeDetayPage() {
       })
     }
     await supabase.from('proje').update({ durum: 'fiyatlama' }).eq('id', id)
-    setFiyatModal(false); setHesaplananFiyatlar([]); load()
-    setFiyatKaydediliyor(false)
+    setFiyatModal(false)
+    setHesaplanan([])
+    load()
+    setKaydediliyor(false)
   }
 
   async function durumGuncelle(yeniDurum: string) {
-    setDurumGuncelleniyor(true)
     await supabase.from('proje').update({ durum: yeniDurum }).eq('id', id)
-    load(); setDurumGuncelleniyor(false)
-  }
-
-  async function sipariseDonus() {
-    if (!confirm('Bu teklifi onaylanmis siparis olarak islemek istediginizden emin misiniz? Uretim planlamaya gececek.')) return
-    await supabase.from('proje').update({ durum: 'musteri_onayladi' }).eq('id', id)
-
-    // Uretim plani olustur
-    const rota = proje?.rota_adimlar || []
-    const { data: makineler } = await supabase.from('makine_tanim').select('*').eq('aktif', true)
-    if (makineler) {
-      let sira = 1
-      for (const adim of rota) {
-        const makine = makineler.find((m: any) => {
-          if (adim === 'baski') return m.tur === 'baski'
-          if (adim.startsWith('laminasyon')) return m.tur === 'laminasyon'
-          if (adim === 'dilimleme') return m.tur === 'dilimleme'
-          if (adim === 'doypack') return m.tur === 'doypack'
-          return false
-        })
-        await supabase.from('uretim_plani').insert({
-          plan_no: `PLN-${Date.now()}-${sira}`,
-          proje_id: id,
-          makine_id: makine?.id || null,
-          adim_sira: sira,
-          adim_tur: adim,
-          durum: 'bekliyor',
-        })
-        sira++
-      }
-    }
     load()
-    alert('Siparis uretim planlamaya alindi!')
-  }
-
-  // Adet fiyati hesapla
-  function adetFiyatiHesapla(fiyat: any): number | null {
-    if (!proje) return null
-    const cikti = proje.cikti_turu
-    if (cikti === 'bobin') return null
-
-    const en = proje.en_mm / 10  // cm
-    const boy = proje.boy_mm / 10  // cm
-    const kurek = (proje.kurek_mm || 0) / 10  // cm
-
-    let alanCm2 = 0
-    if (cikti === 'doypack') alanCm2 = (en * boy * 2) + (en * kurek / 2)
-    else if (cikti === 'quadro') alanCm2 = (en * boy * 2) + (kurek * boy * 2)
-    else if (cikti === 'sirt_kaynak' || cikti === 'yan_kesim') alanCm2 = en * boy * 2
-    else alanCm2 = en * boy * 2
-
-    const toplamGm2 = katmanlar.reduce((s, k) => s + (k.mikron * (k.malzeme?.yogunluk || 0.91)), 0) / 1000
-    const adetAgirlikKg = (alanCm2 / 10000) * toplamGm2
-    if (adetAgirlikKg <= 0) return null
-    return fiyat.satis_fiyati_kg * adetAgirlikKg
   }
 
   if (loading) return <div className="p-8 text-gray-400">Yukleniyor...</div>
   if (!proje) return <div className="p-8 text-red-500">Proje bulunamadi</div>
 
-  const sonTeklif = teklifler[0]
+  const fasonTur = fasonCiktiTuru()
+  const adetGram = hesaplaAdetGram()
 
   return (
     <div className="p-6 max-w-5xl">
       {/* Baslik */}
       <div className="page-header">
         <div>
-          <div className="flex items-center gap-3">
-            <Link href="/projeler" className="text-gray-400 hover:text-gray-600 text-sm">← Projeler</Link>
+          <div className="flex items-center gap-2 mb-1">
+            <Link href="/projeler" className="text-gray-400 hover:text-gray-600 text-xs">← Projeler</Link>
             <span className="text-gray-300">/</span>
-            <span className="font-mono text-sm text-blue-600">{proje.proje_no}</span>
+            <span className="font-mono text-xs text-blue-600">{proje.proje_no}</span>
           </div>
-          <h1 className="page-title mt-1">{proje.ad}</h1>
-          <p className="text-gray-500 text-xs mt-0.5">{proje.musteri?.ad} · {proje.cikti_turu}</p>
+          <h1 className="page-title">{proje.ad}</h1>
+          <p className="text-gray-500 text-xs mt-0.5">{(proje.musteri as any)?.ad} · {proje.cikti_turu}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`badge ${DURUM_BADGE[proje.durum]||'badge-gray'}`}>{DURUM_LABEL[proje.durum]||proje.durum}</span>
           <button onClick={() => setFiyatModal(true)} className="btn btn-primary">Fiyat hesapla</button>
           {proje.durum === 'fiyatlama' && (
-            <button onClick={() => durumGuncelle('proforma_gonderildi')} disabled={durumGuncelleniyor} className="btn btn-warning">
-              Proforma gonderildi
-            </button>
+            <button onClick={() => durumGuncelle('proforma_gonderildi')} className="btn btn-warning">Proforma gonderildi</button>
           )}
           {proje.durum === 'proforma_gonderildi' && (
-            <button onClick={sipariseDonus} className="btn btn-success">
-              ✓ Musteri onayladi — Siparişe donustur
-            </button>
+            <button onClick={() => durumGuncelle('musteri_onayladi')} className="btn btn-success">Musteri onayladi</button>
           )}
         </div>
       </div>
@@ -235,22 +226,13 @@ export default function ProjeDetayPage() {
           <div className="card">
             <div className="card-header"><span className="font-medium text-sm">Urun yapisi</span></div>
             <div className="card-body">
-              <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                <div className="space-y-1.5">
-                  {proje.en_mm && <div className="flex justify-between"><span className="text-gray-500">En</span><span>{proje.en_mm} mm</span></div>}
-                  {proje.boy_mm && <div className="flex justify-between"><span className="text-gray-500">Boy</span><span>{proje.boy_mm} mm</span></div>}
-                  {proje.kurek_mm && <div className="flex justify-between"><span className="text-gray-500">Kurek</span><span>{proje.kurek_mm} mm</span></div>}
-                  {proje.kapak_mm && <div className="flex justify-between"><span className="text-gray-500">Kapak</span><span>{proje.kapak_mm} mm</span></div>}
-                </div>
-                <div className="space-y-1.5">
-                  {proje.bobin_en_mm && <div className="flex justify-between"><span className="text-gray-500">Bobin eni</span><span>{proje.bobin_en_mm} mm</span></div>}
-                  {proje.bobin_cap_mm && <div className="flex justify-between"><span className="text-gray-500">Bobin capi</span><span>{proje.bobin_cap_mm} mm</span></div>}
-                  {proje.kato_eni_mm && <div className="flex justify-between"><span className="text-gray-500">Kato eni</span><span className="font-medium text-blue-600">{proje.kato_eni_mm} mm</span></div>}
-                  {proje.renk_sayisi && <div className="flex justify-between"><span className="text-gray-500">Renk sayisi</span><span>{proje.renk_sayisi} renk</span></div>}
-                </div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm mb-4">
+                {proje.en_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">En</span><span>{proje.en_mm} mm</span></div>}
+                {proje.boy_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Boy</span><span>{proje.boy_mm} mm</span></div>}
+                {proje.kurek_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kurek</span><span>{proje.kurek_mm} mm</span></div>}
+                {proje.kato_eni_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kato eni</span><span className="font-medium text-blue-600">{proje.kato_eni_mm} mm</span></div>}
+                {proje.renk_sayisi && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Renk</span><span>{proje.renk_sayisi} renk</span></div>}
               </div>
-
-              {/* Ozel islemler */}
               <div className="flex gap-2 flex-wrap mb-4">
                 {proje.baskili && <span className="badge badge-blue">{proje.baskili_yuz === 'alt' ? 'Alt baski' : 'Ust baski'}</span>}
                 {proje.zip_var && <span className="badge badge-purple">Zip</span>}
@@ -262,23 +244,38 @@ export default function ProjeDetayPage() {
               {/* Film katmanlari */}
               <div className="border border-gray-100 rounded-xl overflow-hidden">
                 <div className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">Film katmanlari</div>
-                {katmanlar.map((k, i) => (
+                {katmanlar.map(k => (
                   <div key={k.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 last:border-0">
                     <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold flex items-center justify-center flex-shrink-0">{k.sira}</div>
                     <div className="flex-1">
                       <span className="font-medium text-sm">{k.malzeme?.ad}</span>
-                      <span className="text-gray-400 text-xs ml-2">{k.mikron} μm</span>
+                      <span className="text-gray-400 text-xs ml-2">{k.mikron} μm · {k.malzeme?.yogunluk} g/cm³</span>
                     </div>
                     <div className="flex gap-1.5">
                       {k.baskili && <span className="badge badge-blue text-xs">Baskili</span>}
-                      {k.laminasyon_onceki && <span className="badge badge-teal text-xs" style={{background:'#ccfbf1',color:'#0f766e'}}>Lamine</span>}
+                      {k.laminasyon_onceki && <span className="badge text-xs" style={{background:'#ccfbf1',color:'#0f766e'}}>Lamine</span>}
                     </div>
-                    <div className="text-xs text-gray-400 text-right min-w-[60px]">
-                      ${sonFiyatBul(k.malzeme_id).toFixed(4)}/kg
+                    <div className="text-xs text-right">
+                      {sonFiyatBul(k.malzeme_id) > 0
+                        ? <span className="text-green-700 font-medium">${sonFiyatBul(k.malzeme_id).toFixed(4)}/kg</span>
+                        : <span className="text-red-500">Fiyat girilmemis!</span>
+                      }
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* Fason bilgisi */}
+              {fasonTur && adetGram > 0 && (
+                <div className="mt-3 bg-amber-50 rounded-lg px-4 py-3 text-xs text-amber-800">
+                  <span className="font-medium">Fason kesim:</span> {fasonTur} · 1 adet ≈ {adetGram.toFixed(2)} gram
+                  {proje.zip_var && <span className="ml-2">(zip dahil)</span>}
+                  {fasonFiyatBul(fasonTur, adetGram, fasonFiyatlar) > 0
+                    ? <span className="ml-2 font-medium">${fasonFiyatBul(fasonTur, adetGram, fasonFiyatlar).toFixed(4)}/kg</span>
+                    : <span className="ml-2 text-red-600">Fason fiyat bulunamadi!</span>
+                  }
+                </div>
+              )}
             </div>
           </div>
 
@@ -290,35 +287,35 @@ export default function ProjeDetayPage() {
             </div>
             {teklifler.length === 0 ? (
               <div className="card-body text-center text-gray-400 text-sm py-8">
-                Henuz fiyat hesaplanmamis.<br/>
-                <button onClick={()=>setFiyatModal(true)} className="btn btn-primary mt-3">Fiyat hesapla</button>
+                Henuz fiyat hesaplanmamis
+                <div className="mt-3"><button onClick={() => setFiyatModal(true)} className="btn btn-primary btn-sm">Fiyat hesapla</button></div>
               </div>
             ) : (
               <div className="overflow-hidden">
                 <table className="table-base">
                   <thead>
                     <tr>
-                      <th>Miktar</th><th>Satis fiyati (kg)</th>
-                      {proje.cikti_turu !== 'bobin' && <th>Adet fiyati</th>}
-                      <th>m² fiyati</th><th>Kar marji</th><th>Tarih</th>
+                      <th>Miktar</th>
+                      <th>Satis/kg</th>
+                      {proje.cikti_turu !== 'bobin' && <th>Adet agirlik</th>}
+                      <th>m² fiyati</th>
+                      <th>Kar marji</th>
+                      <th>Tarih</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {teklifler.slice(0,9).map((f, i) => {
-                      const adet = adetFiyatiHesapla(f)
-                      return (
-                        <tr key={f.id} className={i===0?'bg-green-50':''}>
-                          <td className="font-medium">{f.miktar_kg?.toLocaleString('tr-TR')} kg</td>
-                          <td className="font-semibold text-green-700">${parseFloat(f.satis_fiyati_kg||0).toFixed(4)}</td>
-                          {proje.cikti_turu !== 'bobin' && (
-                            <td className="font-semibold text-blue-700">{adet ? '$'+adet.toFixed(4) : '—'}</td>
-                          )}
-                          <td className="text-gray-600">${parseFloat(f.satis_fiyati_m2||0).toFixed(4)}</td>
-                          <td>%{f.kar_marji_pct}</td>
-                          <td className="text-gray-400 text-xs">{new Date(f.olusturma).toLocaleDateString('tr-TR')}</td>
-                        </tr>
-                      )
-                    })}
+                    {teklifler.slice(0, 9).map((f, i) => (
+                      <tr key={f.id} className={i === 0 ? 'bg-green-50' : ''}>
+                        <td className="font-medium">{parseFloat(f.miktar_kg).toLocaleString('tr-TR')} kg</td>
+                        <td className="font-semibold text-green-700">${parseFloat(f.satis_fiyati_kg || 0).toFixed(4)}</td>
+                        {proje.cikti_turu !== 'bobin' && (
+                          <td className="text-gray-500 text-xs">{adetGram.toFixed(2)} gr</td>
+                        )}
+                        <td className="text-gray-600">${parseFloat(f.satis_fiyati_m2 || 0).toFixed(4)}</td>
+                        <td>%{f.kar_marji_pct}</td>
+                        <td className="text-gray-400 text-xs">{new Date(f.olusturma).toLocaleDateString('tr-TR')}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -326,11 +323,10 @@ export default function ProjeDetayPage() {
           </div>
         </div>
 
-        {/* Sag panel */}
+        {/* Sag panel - Durum */}
         <div className="space-y-4">
-          {/* Durum akisi */}
           <div className="card">
-            <div className="card-header"><span className="font-medium text-sm">Durum</span></div>
+            <div className="card-header"><span className="font-medium text-sm">Durum akisi</span></div>
             <div className="card-body space-y-2">
               {[
                 {d:'taslak', l:'Taslak'},
@@ -338,26 +334,24 @@ export default function ProjeDetayPage() {
                 {d:'proforma_gonderildi', l:'Proforma gonderildi'},
                 {d:'musteri_onayladi', l:'Musteri onayladi'},
                 {d:'tamamlandi', l:'Tamamlandi'},
-              ].map((s,i) => {
-                const durumlar = ['taslak','fiyatlama','proforma_gonderildi','musteri_onayladi','tamamlandi']
-                const mevcutIdx = durumlar.indexOf(proje.durum)
-                const hedefIdx = durumlar.indexOf(s.d)
+              ].map((s, i) => {
+                const sirali = ['taslak','fiyatlama','proforma_gonderildi','musteri_onayladi','tamamlandi']
+                const mevcutIdx = sirali.indexOf(proje.durum)
+                const hedefIdx = sirali.indexOf(s.d)
                 const gecti = mevcutIdx > hedefIdx
                 const aktif = mevcutIdx === hedefIdx
                 return (
-                  <div key={s.d} className={`flex items-center gap-3 p-2.5 rounded-lg ${aktif?'bg-blue-50 border border-blue-200':'bg-gray-50'}`}>
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs
-                      ${gecti?'bg-green-500 text-white':aktif?'bg-blue-600 text-white':'bg-gray-200 text-gray-400'}`}>
-                      {gecti?'✓':i+1}
+                  <div key={s.d} className={`flex items-center gap-3 p-2.5 rounded-lg ${aktif ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-medium
+                      ${gecti ? 'bg-green-500 text-white' : aktif ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                      {gecti ? '✓' : i+1}
                     </div>
-                    <span className={`text-xs ${aktif?'font-medium text-blue-800':gecti?'text-green-700':'text-gray-400'}`}>{s.l}</span>
+                    <span className={`text-xs ${aktif ? 'font-medium text-blue-800' : gecti ? 'text-green-700' : 'text-gray-400'}`}>{s.l}</span>
                   </div>
                 )
               })}
             </div>
           </div>
-
-          {/* Notlar */}
           {proje.notlar && (
             <div className="card">
               <div className="card-header"><span className="font-medium text-sm">Notlar</span></div>
@@ -367,92 +361,156 @@ export default function ProjeDetayPage() {
         </div>
       </div>
 
-      {/* Fiyat hesaplama modali */}
+      {/* FİYATLAMA MODALI */}
       {fiyatModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-screen overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-100">
               <div className="font-semibold text-gray-900 text-lg">Fiyat hesapla</div>
               <div className="text-sm text-gray-500 mt-0.5">{proje.ad} — 500 / 1.000 / 3.000 kg</div>
             </div>
-            <div className="p-6">
-              {/* Parametreler */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                {[
-                  {l:'Boya fiyati ($/kg)', k:'boya_fiyat', s:'0.01'},
-                  {l:'Tutkal fiyati ($/kg)', k:'tutkal_fiyat', s:'0.01'},
-                  {l:'Iscilik ($/kg)', k:'iscilik', s:'0.01'},
-                  {l:'Fire orani (%)', k:'fire_pct', s:'0.5'},
-                  {l:'Kar marji (%)', k:'kar_pct', s:'1'},
-                  {l:'Fason maliyet ($)', k:'fason_maliyet', s:'1'},
-                ].map(p => (
-                  <div key={p.k}>
-                    <label className="text-xs font-medium text-gray-600 mb-1 block">{p.l}</label>
-                    <input type="number" step={p.s} value={(fiyatForm as any)[p.k]}
-                      onChange={e=>setFiyatForm(prev=>({...prev,[p.k]:e.target.value}))} />
+            <div className="p-6 space-y-5">
+
+              {/* Bobin bilgileri */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Bobin bilgileri</div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Ham bobin eni / Kato eni (mm)</label>
+                    <input type="number" value={hamBobin} onChange={e => setHamBobin(e.target.value)}
+                      placeholder="700" className="text-sm" />
+                    {proje.kato_eni_mm && <div className="text-xs text-gray-400 mt-1">Projeden: {proje.kato_eni_mm} mm</div>}
                   </div>
-                ))}
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Net kullanilabilir en (mm)</label>
+                    <input type="number" value={netEn} onChange={e => setNetEn(e.target.value)} placeholder="680" className="text-sm" />
+                    {hamBobin && netEn && (
+                      <div className="text-xs text-amber-600 mt-1">
+                        Kenar fire: %{(((parseFloat(hamBobin) - parseFloat(netEn)) / parseFloat(hamBobin)) * 100).toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Katman fiyat ozeti */}
-              <div className="bg-gray-50 rounded-xl p-4 mb-4">
+              {/* Kazan çapı */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Kazan çapı</div>
+                <div className="flex items-center gap-3 mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={otomatikKazan} onChange={e => setOtomatikKazan(e.target.checked)} className="w-auto" />
+                    <span className="text-sm text-gray-600">Otomatik hesapla (fotoselden)</span>
+                  </label>
+                </div>
+                {otomatikKazan ? (
+                  <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm text-gray-600">
+                    Kazan çapı proje oluşturulurken girilir. Fotosel = π × (çap/10) cm
+                  </div>
+                ) : (
+                  <select value={kazanCap} onChange={e => setKazanCap(e.target.value)} className="text-sm">
+                    <option value="">Secin...</option>
+                    {KAZAN_CAPLARI.map(c => (
+                      <option key={c} value={c}>{c} mm — Fotosel: {fotoselHesapla(c).toFixed(1)} cm</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Fire ve parametreler */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Uretim parametreleri</div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Baslangic fire (kg)</label>
+                    <input type="number" value={baslangicFire} onChange={e => setBaslangicFire(e.target.value)} placeholder="50" className="text-sm" />
+                    <div className="text-xs text-gray-400 mt-1">Makine ayar firesi</div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Boya (USD/kg)</label>
+                    <input type="number" step="0.01" value={boyaFiyat} onChange={e => setBoyaFiyat(e.target.value)} className="text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Tutkal (USD/kg)</label>
+                    <input type="number" step="0.01" value={tutkalFiyat} onChange={e => setTutkalFiyat(e.target.value)} className="text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Iscilik (USD/kg)</label>
+                    <input type="number" step="0.01" value={iscilik} onChange={e => setIscilik(e.target.value)} className="text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Kar marji (%)</label>
+                    <input type="number" value={karPct} onChange={e => setKarPct(e.target.value)} className="text-sm" />
+                    <div className="text-xs text-gray-400 mt-1">Satis uzerinden</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Malzeme fiyat özeti */}
+              <div className="bg-gray-50 rounded-xl p-4">
                 <div className="text-xs font-medium text-gray-500 mb-2">Guncel malzeme fiyatlari</div>
                 {katmanlar.map(k => (
-                  <div key={k.id} className="flex justify-between text-sm py-1">
+                  <div key={k.id} className="flex justify-between text-sm py-1 border-b border-gray-100 last:border-0">
                     <span className="text-gray-600">{k.malzeme?.ad} ({k.mikron}μm)</span>
-                    <span className={`font-medium ${sonFiyatBul(k.malzeme_id)>0?'text-gray-900':'text-red-500'}`}>
-                      {sonFiyatBul(k.malzeme_id)>0 ? '$'+sonFiyatBul(k.malzeme_id).toFixed(4)+'/kg' : 'FIYAT YOK!'}
-                    </span>
+                    {sonFiyatBul(k.malzeme_id) > 0
+                      ? <span className="font-medium text-gray-900">${sonFiyatBul(k.malzeme_id).toFixed(4)}/kg</span>
+                      : <span className="text-red-500 font-medium">FIYAT YOK!</span>
+                    }
                   </div>
                 ))}
+                {fasonTur && (
+                  <div className="flex justify-between text-sm py-1 mt-1 border-t border-gray-200">
+                    <span className="text-amber-600">Fason ({fasonTur}) · {adetGram.toFixed(2)}gr/adet</span>
+                    <span className="font-medium text-amber-700">${fasonFiyatBul(fasonTur, adetGram, fasonFiyatlar).toFixed(4)}/kg</span>
+                  </div>
+                )}
               </div>
 
-              <button onClick={hesaplaFiyatlar} className="btn btn-primary w-full justify-center mb-4">
-                Hesapla
-              </button>
+              {msg && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{msg}</div>}
 
-              {/* Sonuclar */}
-              {hesaplananFiyatlar.length > 0 && (
-                <div className="border border-gray-200 rounded-xl overflow-hidden mb-4">
+              <button onClick={hesapla} className="btn btn-primary w-full justify-center">Hesapla</button>
+
+              {/* Sonuçlar */}
+              {hesaplanan.length > 0 && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Miktar</th>
-                        <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">m²</th>
+                        <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Net m²</th>
+                        <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Kenar fire</th>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Maliyet/kg</th>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Satis/kg</th>
-                        {proje.cikti_turu !== 'bobin' && <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Adet</th>}
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Toplam</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {hesaplananFiyatlar.map(f => {
-                        const adet = adetFiyatiHesapla(f)
-                        return (
-                          <tr key={f.miktar} className="border-t border-gray-100">
-                            <td className="px-4 py-3 font-medium">{f.miktar.toLocaleString('tr-TR')} kg</td>
-                            <td className="px-4 py-3 text-gray-600">{f.m2.toLocaleString('tr-TR')}</td>
-                            <td className="px-4 py-3 text-gray-600">${(f.toplam_fire_dahil/f.miktar).toFixed(4)}</td>
-                            <td className="px-4 py-3 font-semibold text-green-700">${f.satis_fiyati_kg.toFixed(4)}</td>
-                            {proje.cikti_turu !== 'bobin' && (
-                              <td className="px-4 py-3 text-blue-700 font-medium">{adet?'$'+adet.toFixed(4):'—'}</td>
-                            )}
-                            <td className="px-4 py-3 font-semibold">${f.satis_fiyati.toFixed(2)}</td>
-                          </tr>
-                        )
-                      })}
+                      {hesaplanan.map(f => (
+                        <tr key={f.miktar} className="border-t border-gray-100">
+                          <td className="px-4 py-3 font-medium">{f.miktar.toLocaleString('tr-TR')} kg</td>
+                          <td className="px-4 py-3 text-gray-600">{f.net_m2.toLocaleString('tr-TR')}</td>
+                          <td className="px-4 py-3 text-amber-600">%{f.kenar_fire_pct.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-gray-600">${f.maliyet_kg.toFixed(4)}</td>
+                          <td className="px-4 py-3 font-semibold text-green-700">${f.satis_fiyati_kg.toFixed(4)}</td>
+                          <td className="px-4 py-3 font-semibold">${f.satis_fiyati_toplam.toFixed(2)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+                  {hesaplanan[0] && (
+                    <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 grid grid-cols-3 gap-4">
+                      <div>Baslangic fire: <span className="font-medium text-gray-700">{baslangicFire} kg · ${hesaplanan[0].baslangic_fire_tutar.toFixed(2)}</span></div>
+                      <div>Kenar fire: <span className="font-medium text-gray-700">%{hesaplanan[0].kenar_fire_pct.toFixed(2)}</span></div>
+                      <div>Laminasyon: <span className="font-medium text-gray-700">{laminasyonSayisi()} adet · 2.0 g/m² x{laminasyonSayisi()}</span></div>
+                    </div>
+                  )}
                 </div>
               )}
-
-              {msg && <p className="text-red-600 text-sm mb-3">{msg}</p>}
             </div>
             <div className="p-6 border-t border-gray-100 flex gap-3">
-              <button onClick={()=>{setFiyatModal(false);setHesaplananFiyatlar([]);setMsg('')}} className="btn flex-1 justify-center">Iptal</button>
-              {hesaplananFiyatlar.length > 0 && (
-                <button onClick={fiyatKaydet} disabled={fiyatKaydediliyor} className="btn btn-primary flex-1 justify-center">
-                  {fiyatKaydediliyor ? 'Kaydediliyor...' : 'Fiyatlari kaydet'}
+              <button onClick={() => { setFiyatModal(false); setHesaplanan([]); setMsg('') }} className="btn flex-1 justify-center">Iptal</button>
+              {hesaplanan.length > 0 && (
+                <button onClick={kaydet} disabled={kaydediliyor} className="btn btn-primary flex-1 justify-center">
+                  {kaydediliyor ? 'Kaydediliyor...' : 'Fiyatlari kaydet'}
                 </button>
               )}
             </div>
