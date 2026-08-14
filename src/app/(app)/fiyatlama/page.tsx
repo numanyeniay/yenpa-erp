@@ -43,7 +43,7 @@ export default function FiyatlamaPage() {
     diger: 'Diger',
   }
 
-  const turler = [...new Set(fasonFiyatlar.map(f => f.tur))]
+const turler = fasonFiyatlar.map(f => f.tur).filter((v, i, a) => a.indexOf(v) === i)
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
 
