@@ -257,8 +257,12 @@ export default function ProjeDetayPage() {
                 {proje.en_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">En</span><span>{proje.en_mm} mm</span></div>}
                 {proje.boy_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Boy</span><span>{proje.boy_mm} mm</span></div>}
                 {proje.kurek_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kurek</span><span>{proje.kurek_mm} mm</span></div>}
-                {proje.kato_eni_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kato eni</span><span className="font-medium text-blue-600">{proje.kato_eni_mm} mm</span></div>}
+                {proje.kato_eni_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kato eni (ana bobin)</span><span className="font-medium text-blue-600">{proje.kato_eni_mm} mm</span></div>}
+                {proje.urun_bobin_en_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Urun (bitmis) bobin eni</span><span className="font-medium text-blue-600">{proje.urun_bobin_en_mm} mm</span></div>}
+                {proje.bant_sayisi && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Bant sayisi</span><span>{proje.bant_sayisi}</span></div>}
                 {proje.renk_sayisi && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Renk</span><span>{proje.renk_sayisi} renk</span></div>}
+                {proje.kazan_cap_mm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Kazan capi</span><span>{proje.kazan_cap_mm} mm</span></div>}
+                {proje.fotosel_cm && <div className="flex justify-between py-1 border-b border-gray-50"><span className="text-gray-500">Fotosel</span><span>{proje.fotosel_cm} cm</span></div>}
               </div>
               <div className="flex gap-2 flex-wrap mb-4">
                 {proje.baskili && <span className="badge badge-blue">{proje.baskili_yuz === 'alt' ? 'Alt baski' : 'Ust baski'}</span>}
@@ -266,6 +270,7 @@ export default function ProjeDetayPage() {
                 {proje.sonic_var && <span className="badge badge-purple">Sonic</span>}
                 {proje.mexika_deligi && <span className="badge badge-gray">Meksika deligi</span>}
                 {proje.kargo_bandi && <span className="badge badge-gray">Kargo bandi</span>}
+                {proje.numune_var && <span className="badge badge-green">Numune var</span>}
               </div>
 
               {/* Film katmanlari */}

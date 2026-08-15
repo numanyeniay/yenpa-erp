@@ -3,11 +3,11 @@ import { Fragment, useEffect, useState } from 'react'
 import { supabase, yeniPoNo } from '@/lib/supabase'
 
 const DURUM_BADGE: Record<string, string> = {
-  taslak: 'badge-gray', onaylandi: 'badge-blue', gonderildi: 'badge-amber',
+  talep: 'badge-amber', taslak: 'badge-gray', onaylandi: 'badge-blue', gonderildi: 'badge-amber',
   kismi_teslim: 'badge-amber', teslim_alindi: 'badge-green', iptal: 'badge-red',
 }
 const DURUM_LABEL: Record<string, string> = {
-  taslak: 'Taslak', onaylandi: 'Onaylandi', gonderildi: 'Gonderildi',
+  talep: 'Talep (onay bekliyor)', taslak: 'Taslak', onaylandi: 'Onaylandi', gonderildi: 'Gonderildi',
   kismi_teslim: 'Kismi teslim', teslim_alindi: 'Teslim alindi', iptal: 'Iptal',
 }
 
@@ -24,7 +24,7 @@ export default function SatinAlmaPage() {
   const [acikId, setAcikId] = useState<string | null>(null)
   const [teslimForm, setTeslimForm] = useState<{ kalemId: string; miktar: string; lotNo: string; raf: string } | null>(null)
 
-  const [yeniPO, setYeniPO] = useState({ tedarikci_id: '', ihtiyac_tarihi: '', notlar: '', para_birimi: 'USD' })
+  const [yeniPO, setYeniPO] = useState({ tedarikci_id: '', ihtiyac_tarihi: '', notlar: '', para_birimi: 'USD', talepOlarak: false })
   const [satirlar, setSatirlar] = useState<Kalem[]>([{ malzeme_id: '', mikron: '', en_mm: '', miktar_kg: '', birim_fiyat: '' }])
 
   useEffect(() => { load() }, [])
@@ -59,8 +59,9 @@ export default function SatinAlmaPage() {
       setMsg('Tedarikci ve en az 1 kalem zorunlu.'); setSaving(false); return
     }
     const po_no = await yeniPoNo()
+    const baslangicDurum = yeniPO.talepOlarak ? 'talep' : 'taslak'
     const { data: po, error } = await supabase.from('satinalma_siparis').insert({
-      po_no, tedarikci_id: yeniPO.tedarikci_id, durum: 'taslak',
+      po_no, tedarikci_id: yeniPO.tedarikci_id, durum: baslangicDurum,
       para_birimi: yeniPO.para_birimi, toplam_tutar: toplamTutar,
       ihtiyac_tarihi: yeniPO.ihtiyac_tarihi || null, notlar: yeniPO.notlar || null,
     }).select().single()
@@ -75,8 +76,8 @@ export default function SatinAlmaPage() {
     const { error: e2 } = await supabase.from('satinalma_kalem').insert(kalemInsert)
     if (e2) { setMsg('Hata (kalemler): ' + e2.message); setSaving(false); return }
 
-    setMsg(`${po_no} olusturuldu.`); load()
-    setYeniPO({ tedarikci_id: '', ihtiyac_tarihi: '', notlar: '', para_birimi: 'USD' })
+    setMsg(`${po_no} ${baslangicDurum === 'talep' ? 'talep olarak' : ''} olusturuldu.`); load()
+    setYeniPO({ tedarikci_id: '', ihtiyac_tarihi: '', notlar: '', para_birimi: 'USD', talepOlarak: false })
     setSatirlar([{ malzeme_id: '', mikron: '', en_mm: '', miktar_kg: '', birim_fiyat: '' }])
     setSaving(false)
   }
@@ -85,6 +86,8 @@ export default function SatinAlmaPage() {
     await supabase.from('satinalma_siparis').update({ durum }).eq('id', id)
     load()
   }
+
+  const onayBekleyenTalepler = siparisler.filter(s => s.durum === 'talep')
 
   async function teslimAl(kalem: any) {
     if (!teslimForm) return
@@ -131,6 +134,24 @@ export default function SatinAlmaPage() {
       <div className="page-header">
         <h1 className="page-title">Satin Alma</h1>
       </div>
+
+      {onayBekleyenTalepler.length > 0 && (
+        <div className="card card-body mb-6 bg-amber-50 border-amber-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-800 font-medium text-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Onay bekleyen talepler ({onayBekleyenTalepler.length})
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {onayBekleyenTalepler.map(s => (
+              <button key={s.id} onClick={() => setAcikId(s.id)} className="badge badge-amber hover:opacity-80">
+                {s.po_no} — {s.tedarikci?.ad} (${Number(s.toplam_tutar || 0).toFixed(2)})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card mb-6">
         <div className="card-header"><span className="font-medium text-sm">Yeni siparis (PO) olustur</span></div>
@@ -196,8 +217,12 @@ export default function SatinAlmaPage() {
             <label>Notlar</label>
             <input value={yeniPO.notlar} onChange={e => setYeniPO(p => ({ ...p, notlar: e.target.value }))} />
           </div>
+          <label className="flex items-center gap-2 mt-3 !mb-0 cursor-pointer">
+            <input type="checkbox" checked={yeniPO.talepOlarak} onChange={e => setYeniPO(p => ({ ...p, talepOlarak: e.target.checked }))} />
+            <span className="text-sm text-gray-600">Onaya gonder (talep olarak olustur — dogrudan siparise gecmeden once onay bekler)</span>
+          </label>
           {msg && <p className={`text-sm mt-2 ${msg.startsWith('Hata') ? 'text-red-600' : 'text-green-600'}`}>{msg}</p>}
-          <button onClick={poOlustur} disabled={saving} className="btn btn-primary mt-3">Siparis olustur</button>
+          <button onClick={poOlustur} disabled={saving} className="btn btn-primary mt-3">{yeniPO.talepOlarak ? 'Talep olustur' : 'Siparis olustur'}</button>
         </div>
       </div>
 
@@ -219,6 +244,8 @@ export default function SatinAlmaPage() {
                   <tr key={s.id + '-detay'}>
                     <td colSpan={6} className="bg-gray-50 !py-4">
                       <div className="flex gap-2 mb-3">
+                        {s.durum === 'talep' && <button onClick={() => durumGuncelle(s.id, 'taslak')} className="btn btn-sm btn-success">Talebi onayla</button>}
+                        {s.durum === 'talep' && <button onClick={() => durumGuncelle(s.id, 'iptal')} className="btn btn-sm btn-danger">Talebi reddet</button>}
                         {s.durum === 'taslak' && <button onClick={() => durumGuncelle(s.id, 'onaylandi')} className="btn btn-sm btn-primary">Onayla</button>}
                         {s.durum === 'onaylandi' && <button onClick={() => durumGuncelle(s.id, 'gonderildi')} className="btn btn-sm btn-primary">Tedarikciye gonder</button>}
                         {['taslak', 'onaylandi', 'gonderildi'].includes(s.durum) && <button onClick={() => durumGuncelle(s.id, 'iptal')} className="btn btn-sm btn-danger">Iptal et</button>}

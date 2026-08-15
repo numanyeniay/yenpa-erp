@@ -42,9 +42,12 @@ interface FormState {
   cikti_turu: string
   en_mm: string; boy_mm: string; kurek_mm: string; kapak_mm: string
   bobin_en_mm: string; bobin_cap_mm: string; bobin_metre: string
+  urun_bobin_en_mm: string; bant_sayisi: string
   baskili: boolean; baskili_yuz: string; renk_sayisi: string
+  kazan_cap_mm: string; fotosel_cm: string
   yan_yana_baski: string
   zip_var: boolean; sonic_var: boolean; mexika_deligi: boolean; kargo_bandi: boolean
+  numune_var: boolean
   kenar_tirasi_mm: string
   notlar: string
 }
@@ -61,9 +64,12 @@ export default function YeniProjePage() {
     cikti_turu:'bobin',
     en_mm:'', boy_mm:'', kurek_mm:'', kapak_mm:'',
     bobin_en_mm:'', bobin_cap_mm:'', bobin_metre:'',
+    urun_bobin_en_mm:'', bant_sayisi:'',
     baskili:false, baskili_yuz:'ust', renk_sayisi:'1',
+    kazan_cap_mm:'', fotosel_cm:'',
     yan_yana_baski:'1',
     zip_var:false, sonic_var:false, mexika_deligi:false, kargo_bandi:false,
+    numune_var:false,
     kenar_tirasi_mm:'',
     notlar:'',
   })
@@ -106,10 +112,14 @@ export default function YeniProjePage() {
   const n = (s: string) => parseFloat(s) || 0
   const ni = (s: string) => parseInt(s) || 0
 
+  // Baskili durumu katmanlardan turetilir (fiyatlama motoruyla ayni mantik) —
+  // form.baskili alaninin arayuzde girisi yok, tek basina kullanilmaz.
+  const baskiliDerived = katmanlar.some(k => k.baskili)
+
   // Otomatik rota
   const rota = projeRotasiHesapla(
     {
-      baskili: form.baskili,
+      baskili: baskiliDerived,
       sonic_var: form.sonic_var,
       cikti_turu: form.cikti_turu as any,
     },
@@ -152,15 +162,20 @@ export default function YeniProjePage() {
       bobin_en_mm: n(form.bobin_en_mm) || null,
       bobin_cap_mm: n(form.bobin_cap_mm) || null,
       bobin_metre: n(form.bobin_metre) || null,
-      baskili: form.baskili,
-      baskili_yuz: form.baskili ? form.baskili_yuz : null,
-      renk_sayisi: form.baskili ? ni(form.renk_sayisi) : null,
+      urun_bobin_en_mm: n(form.urun_bobin_en_mm) || null,
+      bant_sayisi: ni(form.bant_sayisi) || null,
+      baskili: baskiliDerived,
+      baskili_yuz: baskiliDerived ? form.baskili_yuz : null,
+      renk_sayisi: baskiliDerived ? ni(form.renk_sayisi) : null,
+      kazan_cap_mm: baskiliDerived ? (n(form.kazan_cap_mm) || null) : null,
+      fotosel_cm: baskiliDerived ? (n(form.fotosel_cm) || null) : null,
       kato_eni_mm: katoEni || null,
       yan_yana_baski: ni(form.yan_yana_baski),
       zip_var: form.zip_var,
       sonic_var: form.sonic_var,
       mexika_deligi: form.mexika_deligi,
       kargo_bandi: form.kargo_bandi,
+      numune_var: form.numune_var,
       kenar_tirasi_mm: n(form.kenar_tirasi_mm) || null,
       notlar: form.notlar || null,
       durum: 'taslak',
@@ -225,8 +240,14 @@ export default function YeniProjePage() {
 
             {showBobin && (
               <div className="form-grid-3">
-                <div><label>Bobin eni (mm)</label>
-                  <input type="number" value={form.bobin_en_mm} onChange={e => setF('bobin_en_mm', e.target.value)} placeholder="350" /></div>
+                <div><label>Ana bobin eni (mm) — kato eni</label>
+                  <input type="number" value={form.bobin_en_mm} onChange={e => setF('bobin_en_mm', e.target.value)} placeholder="350" />
+                  <p className="text-xs text-gray-400 mt-0.5">Baskiya giren ham/genis bobinin eni</p></div>
+                <div><label>Urun (bitmis) bobin eni (mm)</label>
+                  <input type="number" value={form.urun_bobin_en_mm} onChange={e => setF('urun_bobin_en_mm', e.target.value)} placeholder="150" />
+                  <p className="text-xs text-gray-400 mt-0.5">Dilimleme sonrasi musteriye giden bobin eni</p></div>
+                <div><label>Bant sayisi</label>
+                  <input type="number" value={form.bant_sayisi} onChange={e => setF('bant_sayisi', e.target.value)} placeholder="1" min={1} /></div>
                 <div><label>Bobin capi (mm)</label>
                   <input type="number" value={form.bobin_cap_mm} onChange={e => setF('bobin_cap_mm', e.target.value)} placeholder="300" /></div>
                 <div><label>Bobin metre</label>
@@ -269,6 +290,7 @@ export default function YeniProjePage() {
                   { key:'sonic_var' as keyof FormState,     label:'Sonic islem' },
                   { key:'mexika_deligi' as keyof FormState, label:'Meksika sapkasi deligi' },
                   { key:'kargo_bandi' as keyof FormState,   label:'Kargo bandi' },
+                  { key:'numune_var' as keyof FormState,    label:'Numune var' },
                 ].map(opt => (
                   <label key={opt.key} className="flex items-center gap-2 cursor-pointer mb-0">
                     <input type="checkbox" checked={!!form[opt.key]}
@@ -347,6 +369,13 @@ export default function YeniProjePage() {
                       {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n} renk</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label>Kazan capi (mm)</label>
+                    <input type="number" value={form.kazan_cap_mm} onChange={e => setF('kazan_cap_mm', e.target.value)} placeholder="420" /></div>
+                  <div>
+                    <label>Fotosel (cm)</label>
+                    <input type="number" value={form.fotosel_cm} onChange={e => setF('fotosel_cm', e.target.value)} placeholder="21" step="0.1" />
+                    <p className="text-xs text-gray-400 mt-0.5">Is emrindeki fotosel araligi (cm)</p></div>
                 </div>
               </div>
             )}

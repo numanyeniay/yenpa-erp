@@ -26,6 +26,7 @@ const DURUM_BADGE: Record<string, string> = {
 }
 
 export default function PlanlamaPage() {
+  const [ustTab, setUstTab] = useState<'plan'|'makine'>('plan')
   const [onayliProjeler, setOnayliProjeler] = useState<any[]>([])
   const [planlar, setPlanlar] = useState<any[]>([])
   const [makineler, setMakineler] = useState<any[]>([])
@@ -102,6 +103,55 @@ export default function PlanlamaPage() {
         <h1 className="page-title">Uretim Planlama</h1>
       </div>
 
+      <div className="flex gap-0 mb-6 border-b border-gray-200">
+        {[{ k: 'plan', l: 'Plan' }, { k: 'makine', l: 'Makine Parkuru' }].map(t => (
+          <button key={t.k} onClick={() => setUstTab(t.k as any)}
+            className={`px-5 py-2.5 text-sm border-b-2 -mb-px transition-colors ${ustTab === t.k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {ustTab === 'makine' && (
+        <div className="grid grid-cols-3 gap-4">
+          {makineler.map(m => {
+            const bekleyenAdimlar = planlar.filter(p => p.makine_id === m.id && !['tamamlandi', 'iptal'].includes(p.durum))
+            const toplamDk = bekleyenAdimlar.reduce((t, p) => t + (p.planlanan_sure_dk || 0), 0)
+            const kapasite = m.gunluk_kapasite_dk || 540
+            const dolulukGun = toplamDk / kapasite
+            const dolulukPct = Math.min(100, Math.round((toplamDk / kapasite) * 100))
+            const renk = dolulukGun > 2 ? 'bg-red-500' : dolulukGun > 1 ? 'bg-amber-500' : 'bg-green-500'
+            const calisanVar = bekleyenAdimlar.some(p => p.durum === 'calisiyor')
+            return (
+              <div key={m.id} className="card card-body">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <div className="font-semibold text-sm">{m.ad}</div>
+                    <div className="text-xs text-gray-400">{m.tur}{m.fason ? ' · fason' : ''}</div>
+                  </div>
+                  <span className={`badge ${calisanVar ? 'badge-amber' : 'badge-green'}`}>{calisanVar ? 'Calisiyor' : 'Musait'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                  <span>Bekleyen is</span><span className="font-semibold text-gray-900">{bekleyenAdimlar.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                  <span>Planlanan sure</span><span className="font-semibold text-gray-900">{toplamDk} dk</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2 mt-2 mb-1 overflow-hidden">
+                  <div className={`h-2 rounded-full ${renk}`} style={{ width: `${dolulukPct}%` }} />
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400">Doluluk (gunluk kapasiteye gore)</span>
+                  <span className="font-medium text-gray-700">{dolulukGun.toFixed(1)} gun</span>
+                </div>
+              </div>
+            )
+          })}
+          {makineler.length === 0 && <div className="col-span-3 card card-body text-center text-gray-400 text-sm py-10">Makine tanimi yok</div>}
+        </div>
+      )}
+
+      {ustTab === 'plan' && <>
       {onayliProjeler.length > 0 && (
         <div className="card mb-6">
           <div className="card-header"><span className="font-medium text-sm">Plani olusturulmamis onayli projeler ({onayliProjeler.length})</span></div>
@@ -174,6 +224,7 @@ export default function PlanlamaPage() {
           <div className="card card-body text-center text-gray-400 text-sm py-10">Henuz uretim plani yok</div>
         )}
       </div>
+      </>}
     </div>
   )
 }

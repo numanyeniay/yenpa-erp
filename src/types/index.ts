@@ -87,6 +87,7 @@ export interface Makine {
   marka?: string
   max_en_mm?: number
   hedef_hiz_m_dk?: number
+  gunluk_kapasite_dk?: number
   fason: boolean
   fason_firma?: string
   aktif: boolean
@@ -124,6 +125,11 @@ export interface Proje {
   renk_sayisi?: number
   kato_eni_mm?: number
   yan_yana_baski?: number
+  kazan_cap_mm?: number
+  fotosel_cm?: number
+  bant_sayisi?: number
+  numune_var?: boolean
+  urun_bobin_en_mm?: number
   zip_var: boolean
   sonic_var: boolean
   mexika_deligi: boolean
@@ -200,19 +206,23 @@ export function projeRotasiHesapla(proje: Partial<Proje>, katmanlar: ProjeKatman
   const adimlar: AdimTur[] = []
   const laminasyonSayisi = katmanlar.filter(k => k.laminasyon_onceki).length
 
-  // Baskı var mı?
-  if (proje.baskili) adimlar.push('baski')
+  // Baskı var mı? Katman bazlı bilgi esas alınır (fiyatlama motoruyla aynı mantık);
+  // proje.baskili sadece geriye dönük uyumluluk için OR'lanır.
+  const baskili = katmanlar.some(k => k.baskili) || !!proje.baskili
+  if (baskili) adimlar.push('baski')
 
   // Kaç laminasyon?
   if (laminasyonSayisi >= 1) { adimlar.push('laminasyon_1'); adimlar.push('kurleme_1') }
   if (laminasyonSayisi >= 2) { adimlar.push('laminasyon_2'); adimlar.push('kurleme_2') }
   if (laminasyonSayisi >= 3) { adimlar.push('laminasyon_3'); adimlar.push('kurleme_3') }
 
-  // Dilimleme her zaman var (bobin çıktısı için)
-  adimlar.push('dilimleme')
+  // Dilimleme sadece nihai çıktı bobin/rulo ise vardır (gerçek iş emirlerinden
+  // doğrulandı: katlama_torba, yan_kesim vb. çıktılarda dilimleme adımı yoktur,
+  // baskı/laminasyon sonrası doğrudan katlama/kesim'e geçilir).
+  const cikti = proje.cikti_turu
+  if (cikti === 'bobin') adimlar.push('dilimleme')
 
   // Çıktı tipine göre ek adımlar
-  const cikti = proje.cikti_turu
   if (cikti === 'katlama_torba') { adimlar.push('katlama'); if (proje.sonic_var) adimlar.push('sonic') }
   if (cikti === 'yan_kesim') adimlar.push('yan_kesim')
   if (cikti === 'doypack') adimlar.push('doypack')

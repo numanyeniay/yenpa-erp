@@ -11,11 +11,12 @@ const HAREKET_TURLERI = [
 ]
 
 export default function DepoPage() {
-  const [tab, setTab] = useState<'stok'|'hareket'>('stok')
+  const [tab, setTab] = useState<'stok'|'hareket'|'ise-gore'>('stok')
   const [stoklar, setStoklar] = useState<any[]>([])
   const [malzemeler, setMalzemeler] = useState<any[]>([])
   const [tedarikciler, setTedarikciler] = useState<any[]>([])
   const [hareketler, setHareketler] = useState<any[]>([])
+  const [projeler, setProjeler] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -26,19 +27,20 @@ export default function DepoPage() {
     agirlik_kg: '', birim_fiyat: '', para_birimi: 'USD', depo_raf: '', irsaliye_no: '',
   })
   const [yeniHareket, setYeniHareket] = useState({
-    stok_id: '', tur: 'cikis', miktar_kg: '', aciklama: '',
+    stok_id: '', tur: 'cikis', miktar_kg: '', aciklama: '', proje_id: '',
   })
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: s }, { data: m }, { data: t }, { data: h }] = await Promise.all([
+    const [{ data: s }, { data: m }, { data: t }, { data: h }, { data: p }] = await Promise.all([
       supabase.from('depo_stok').select('*, malzeme:malzeme_tanim(ad,tur,min_stok_kg), tedarikci:tedarikci_tanim(ad)').order('giris_tarihi', { ascending: false }),
       supabase.from('malzeme_tanim').select('*').eq('aktif', true).order('ad'),
       supabase.from('tedarikci_tanim').select('*').eq('aktif', true).order('ad'),
-      supabase.from('depo_hareket').select('*, stok:depo_stok(lot_no, malzeme:malzeme_tanim(ad))').order('tarih', { ascending: false }).limit(100),
+      supabase.from('depo_hareket').select('*, stok:depo_stok(lot_no, malzeme:malzeme_tanim(ad)), proje:proje(proje_no,ad)').order('tarih', { ascending: false }).limit(200),
+      supabase.from('proje').select('id,proje_no,ad').in('durum', ['musteri_onayladi', 'uretimde']).order('olusturma', { ascending: false }),
     ])
-    setStoklar(s || []); setMalzemeler(m || []); setTedarikciler(t || []); setHareketler(h || [])
+    setStoklar(s || []); setMalzemeler(m || []); setTedarikciler(t || []); setHareketler(h || []); setProjeler(p || [])
     setLoading(false)
   }
 
@@ -105,7 +107,7 @@ export default function DepoPage() {
 
     const { error: e1 } = await supabase.from('depo_hareket').insert({
       stok_id: yeniHareket.stok_id, tur: yeniHareket.tur, miktar_kg: miktar,
-      aciklama: yeniHareket.aciklama || null,
+      aciklama: yeniHareket.aciklama || null, proje_id: yeniHareket.proje_id || null,
     })
     if (e1) { setMsg('Hata: ' + e1.message); setSaving(false); return }
 
@@ -115,7 +117,7 @@ export default function DepoPage() {
     }
 
     setMsg('Hareket kaydedildi.'); load()
-    setYeniHareket({ stok_id: '', tur: 'cikis', miktar_kg: '', aciklama: '' })
+    setYeniHareket({ stok_id: '', tur: 'cikis', miktar_kg: '', aciklama: '', proje_id: '' })
     setSaving(false)
   }
 
@@ -146,7 +148,7 @@ export default function DepoPage() {
       )}
 
       <div className="flex gap-0 mb-6 border-b border-gray-200">
-        {[{ k: 'stok', l: 'Stok Listesi' }, { k: 'hareket', l: 'Hareketler' }].map(t => (
+        {[{ k: 'stok', l: 'Stok Listesi' }, { k: 'hareket', l: 'Hareketler' }, { k: 'ise-gore', l: 'Ise Gore Stok Durumu' }].map(t => (
           <button key={t.k} onClick={() => { setTab(t.k as any); setMsg('') }}
             className={`px-5 py-2.5 text-sm border-b-2 -mb-px transition-colors ${tab === t.k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {t.l}
@@ -273,9 +275,18 @@ export default function DepoPage() {
                   <input type="number" step="0.001" value={yeniHareket.miktar_kg} onChange={e => setYeniHareket(p => ({ ...p, miktar_kg: e.target.value }))} />
                 </div>
               </div>
-              <div className="mt-3">
-                <label>Aciklama</label>
-                <input value={yeniHareket.aciklama} onChange={e => setYeniHareket(p => ({ ...p, aciklama: e.target.value }))} placeholder="Opsiyonel — proje no, sebep vb." />
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label>Ise bagla (opsiyonel)</label>
+                  <select value={yeniHareket.proje_id} onChange={e => setYeniHareket(p => ({ ...p, proje_id: e.target.value }))}>
+                    <option value="">Bagli degil (genel stok hareketi)</option>
+                    {projeler.map(p => <option key={p.id} value={p.id}>{p.ad} ({p.proje_no})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label>Aciklama</label>
+                  <input value={yeniHareket.aciklama} onChange={e => setYeniHareket(p => ({ ...p, aciklama: e.target.value }))} placeholder="Opsiyonel — sebep vb." />
+                </div>
               </div>
               {msg && <p className={`text-sm mt-2 ${msg.startsWith('Hata') ? 'text-red-600' : 'text-green-600'}`}>{msg}</p>}
               <button onClick={hareketEkle} disabled={saving} className="btn btn-primary mt-3">Hareketi kaydet</button>
@@ -284,7 +295,7 @@ export default function DepoPage() {
 
           <div className="card p-0 overflow-hidden">
             <table className="table-base">
-              <thead><tr><th>Tarih</th><th>Malzeme / Lot</th><th>Tur</th><th>Miktar</th><th>Aciklama</th></tr></thead>
+              <thead><tr><th>Tarih</th><th>Malzeme / Lot</th><th>Tur</th><th>Miktar</th><th>Is</th><th>Aciklama</th></tr></thead>
               <tbody>
                 {hareketler.map(h => (
                   <tr key={h.id}>
@@ -296,13 +307,65 @@ export default function DepoPage() {
                       </span>
                     </td>
                     <td className="font-semibold">{Number(h.miktar_kg).toFixed(1)} kg</td>
+                    <td className="text-gray-500 text-xs">{h.proje ? `${h.proje.ad} (${h.proje.proje_no})` : '—'}</td>
                     <td className="text-gray-500 text-xs">{h.aciklama || '—'}</td>
                   </tr>
                 ))}
-                {hareketler.length === 0 && <tr><td colSpan={5} className="text-center text-gray-400 py-8">Hareket kaydi yok</td></tr>}
+                {hareketler.length === 0 && <tr><td colSpan={6} className="text-center text-gray-400 py-8">Hareket kaydi yok</td></tr>}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {tab === 'ise-gore' && (
+        <div className="space-y-4">
+          {(() => {
+            const gruplu: Record<string, any[]> = {}
+            for (const h of hareketler.filter(h => h.proje_id)) {
+              const k = h.proje_id
+              if (!gruplu[k]) gruplu[k] = []
+              gruplu[k].push(h)
+            }
+            const projeIdler = Object.keys(gruplu)
+            if (projeIdler.length === 0) {
+              return <div className="card card-body text-center text-gray-400 text-sm py-10">Henuz hicbir stok hareketi bir ise baglanmamis. Hareketler sekmesinden yeni hareket eklerken "Ise bagla" alanini kullanin.</div>
+            }
+            return projeIdler.map(pid => {
+              const hs = gruplu[pid]
+              const proje = hs[0].proje
+              const ozet: Record<string, { ad: string, giris: number, cikis: number, fire: number, rezerve: number }> = {}
+              for (const h of hs) {
+                const ad = h.stok?.malzeme?.ad || 'Bilinmeyen malzeme'
+                if (!ozet[ad]) ozet[ad] = { ad, giris: 0, cikis: 0, fire: 0, rezerve: 0 }
+                if (h.tur === 'giris') ozet[ad].giris += h.miktar_kg
+                if (h.tur === 'cikis') ozet[ad].cikis += h.miktar_kg
+                if (h.tur === 'fire') ozet[ad].fire += h.miktar_kg
+                if (h.tur === 'rezerve') ozet[ad].rezerve += h.miktar_kg
+              }
+              return (
+                <div key={pid} className="card p-0 overflow-hidden">
+                  <div className="card-header bg-gray-50">
+                    <span className="font-medium text-sm">{proje?.ad} <span className="text-gray-400 font-mono text-xs">({proje?.proje_no})</span></span>
+                    <span className="text-xs text-gray-400">{hs.length} hareket</span>
+                  </div>
+                  <table className="table-base">
+                    <thead><tr><th>Malzeme</th><th>Rezerve</th><th>Uretime sevk (cikis)</th><th>Fire</th></tr></thead>
+                    <tbody>
+                      {Object.values(ozet).map(o => (
+                        <tr key={o.ad}>
+                          <td className="font-medium">{o.ad}</td>
+                          <td>{o.rezerve > 0 ? <span className="badge badge-amber">{o.rezerve.toFixed(1)} kg</span> : '—'}</td>
+                          <td>{o.cikis > 0 ? <span className="badge badge-blue">{o.cikis.toFixed(1)} kg</span> : '—'}</td>
+                          <td>{o.fire > 0 ? <span className="badge badge-red">{o.fire.toFixed(1)} kg</span> : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })
+          })()}
         </div>
       )}
     </div>
