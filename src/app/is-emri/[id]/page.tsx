@@ -33,7 +33,10 @@ export default function IsEmriPage() {
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
   if (!proje) return <div className="p-8 text-red-500 text-sm">Proje bulunamadi</div>
 
-  const filmGm2 = katmanlar.reduce((s, k) => s + (Number(k.mikron) || 0) * (Number(k.malzeme?.yogunluk) || 0.92), 0) / 1000
+  // mikron (um) * yogunluk (g/cm3) birim ozdesligi geregi doğrudan g/m2 verir — /1000
+  // BOLME YOK (projeler/[id] sayfasindaki filmGm2, farkli bir kg-bazli maliyet
+  // formulunun ara adimi oldugu icin orada /1000 var; burada dogrudan gramaj gosteriliyor).
+  const filmGm2 = katmanlar.reduce((s, k) => s + (Number(k.mikron) || 0) * (Number(k.malzeme?.yogunluk) || 0.92), 0)
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 print:bg-white print:py-0">
