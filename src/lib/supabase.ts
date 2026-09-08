@@ -36,6 +36,12 @@ export async function yeniPlanNo(): Promise<string> {
   return `PLN-${new Date().getFullYear()}-${String(no).padStart(4,'0')}`
 }
 
+export async function yeniSikayetNo(): Promise<string> {
+  const { data } = await supabase.rpc('nextval', { sequence_name: 'sikayet_no_seq' }).single()
+  const no = data || Math.floor(Math.random() * 9000) + 1000
+  return `SKY-${new Date().getFullYear()}-${String(no).padStart(4,'0')}`
+}
+
 // Depoya yeni bir parti girerken (tedarikci + malzeme secilince) onerilen
 // lot kodu — kullanici isterse elle degistirebilir. Format:
 // {TEDARIKCI_KOD}-{MALZEME_KOD}-{YYMMDD}-{sira}
