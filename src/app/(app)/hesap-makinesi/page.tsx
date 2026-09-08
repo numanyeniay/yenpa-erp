@@ -1,13 +1,18 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { katoEniHesapla, type CiktiTuru } from '@/types'
+import { useAuth } from '@/lib/auth'
+import { type CiktiTuru } from '@/types'
 import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, type FiyatGirdisi, type FiyatCiktisi } from '@/lib/fiyatlama'
 
 const CIKTI_LABEL: Record<CiktiTuru, string> = {
   bobin: 'Bobin', doypack: 'Doypack', quadro: 'Quadro', flat_bottom: 'Flat bottom',
   sirt_kaynak: 'Sirt kaynak', yan_kesim: 'Yan kesim', katlama_torba: 'Katlama torba', diger: 'Diger',
 }
+
+const PARCA_TURLERI: CiktiTuru[] = ['doypack', 'quadro', 'flat_bottom', 'sirt_kaynak', 'yan_kesim', 'katlama_torba']
+const FASON_TURLERI: CiktiTuru[] = ['doypack', 'quadro', 'flat_bottom', 'sirt_kaynak']
 
 interface KatmanSatir {
   malzeme_id: string
@@ -16,20 +21,24 @@ interface KatmanSatir {
   laminasyon_onceki: boolean
 }
 
+// Kenar fire% sabitlenince hesaplaFiyat() motoruna gercekci ama uydurma bir
+// bobin/net en cifti veriyoruz — sonuc sadece orandan etkilendigi icin
+// gercek mm'lere hic ihtiyac yok, satisci kato eni girmek zorunda kalmiyor.
+const SENTETIK_BOBIN_EN_MM = 10000
+
 export default function HesapMakinesiPage() {
+  const { user } = useAuth()
   const [malzemeler, setMalzemeler] = useState<any[]>([])
   const [fiyatlar, setFiyatlar] = useState<any[]>([])
   const [fasonFiyatlar, setFasonFiyatlar] = useState<any[]>([])
+  const [parametre, setParametre] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   const [ciktiTuru, setCiktiTuru] = useState<CiktiTuru>('doypack')
   const [enMm, setEnMm] = useState('200')
   const [boyMm, setBoyMm] = useState('300')
   const [kurekMm, setKurekMm] = useState('50')
-  const [kapakMm, setKapakMm] = useState('50')
-  const [bobinEnMm, setBobinEnMm] = useState('350')
-  const [kenarTirasiMm, setKenarTirasiMm] = useState('5')
-  const [netEnManuel, setNetEnManuel] = useState('')
+  const [bobinEnMm, setBobinEnMm] = useState('350') // sadece cikti turu=bobin icin: satilan urunun kendi eni
 
   const [katmanlar, setKatmanlar] = useState<KatmanSatir[]>([
     { malzeme_id: '', mikron: '20', baskili: true, laminasyon_onceki: false },
@@ -37,10 +46,6 @@ export default function HesapMakinesiPage() {
   ])
 
   const [siparisKg, setSiparisKg] = useState('500')
-  const [baslangicFireKg, setBaslangicFireKg] = useState('50')
-  const [boyaFiyat, setBoyaFiyat] = useState('4.50')
-  const [tutkalFiyat, setTutkalFiyat] = useState('4.50')
-  const [iscilik, setIscilik] = useState('0.50')
   const [karPct, setKarPct] = useState('25')
   const [zipVar, setZipVar] = useState(false)
   const [fasonKullan, setFasonKullan] = useState(true)
@@ -48,37 +53,23 @@ export default function HesapMakinesiPage() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: m }, { data: f }, { data: ff }] = await Promise.all([
+    const [{ data: m }, { data: f }, { data: ff }, { data: p }] = await Promise.all([
       supabase.from('malzeme_tanim').select('*').eq('aktif', true).order('ad'),
       supabase.from('malzeme_fiyat').select('*').order('gecerlilik_tarihi', { ascending: false }),
       supabase.from('fason_fiyat').select('*').eq('aktif', true).order('tur').order('min_gram'),
+      supabase.from('referans_parametre').select('*').eq('id', 1).single(),
     ])
     setMalzemeler(m || [])
     setFiyatlar(f || [])
     setFasonFiyatlar(ff || [])
+    setParametre(p)
     setLoading(false)
   }
 
-  // Her malzeme icin en guncel fiyat (gecerlilik_tarihi'ne gore ilk kayit)
   function guncelFiyat(malzeme_id: string): number {
     const kayit = fiyatlar.find(f => f.malzeme_id === malzeme_id)
     return kayit ? Number(kayit.birim_fiyat) : 0
   }
-
-  const katoEni = useMemo(() => katoEniHesapla({
-    cikti_turu: ciktiTuru,
-    en_mm: parseFloat(enMm) || 0,
-    boy_mm: parseFloat(boyMm) || 0,
-    kurek_mm: parseFloat(kurekMm) || 0,
-    kapak_mm: parseFloat(kapakMm) || 0,
-    bobin_en_mm: parseFloat(bobinEnMm) || 0,
-  }), [ciktiTuru, enMm, boyMm, kurekMm, kapakMm, bobinEnMm])
-
-  const netEnHesap = useMemo(() => {
-    if (netEnManuel) return parseFloat(netEnManuel) || 0
-    const tiras = parseFloat(kenarTirasiMm) || 0
-    return Math.max(0, katoEni - tiras * 2)
-  }, [katoEni, kenarTirasiMm, netEnManuel])
 
   function katmanEkle() {
     setKatmanlar([...katmanlar, { malzeme_id: '', mikron: '', baskili: false, laminasyon_onceki: false }])
@@ -90,7 +81,11 @@ export default function HesapMakinesiPage() {
     setKatmanlar(katmanlar.map((k, idx) => idx === i ? { ...k, ...patch } : k))
   }
 
-  const sonuc: FiyatCiktisi | null = useMemo(() => {
+  const isParca = PARCA_TURLERI.includes(ciktiTuru)
+  const fireYuzdesi = parametre ? Number(parametre.ortalama_kenar_fire_pct) : 2
+
+  const hesap = useMemo(() => {
+    if (!parametre) return null
     const gecerliKatmanlar = katmanlar.filter(k => k.malzeme_id && parseFloat(k.mikron) > 0)
     if (gecerliKatmanlar.length === 0) return null
 
@@ -107,13 +102,16 @@ export default function HesapMakinesiPage() {
     })
 
     const laminasyonSayisi = gecerliKatmanlar.filter(k => k.laminasyon_onceki).length
+    const filmKgM2 = katmanGirdi.reduce((s, k) => s + (k.mikron * k.yogunluk) / 1000, 0)
 
-    // Fason: sadece doypack/quadro/flat_bottom/sirt_kaynak icin ve kullanici secmisse
+    // Fason: sadece parca urunlerde ve kullanici secmisse. Adet agirligini
+    // her zaman hesapliyoruz ki tanimli fiyat olmasa bile agirligi gosterebilelim.
+    let adetGram = 0
     let fasonBirimFiyat = 0
-    const fasonUygulanir = fasonKullan && ['doypack', 'quadro', 'flat_bottom', 'sirt_kaynak'].includes(ciktiTuru)
-    if (fasonUygulanir) {
-      const filmKgM2 = katmanGirdi.reduce((s, k) => s + (k.mikron * k.yogunluk) / 1000, 0)
-      const adetGram = adetAgirligiHesapla({
+    let fasonUygulanabilir = false
+    if (FASON_TURLERI.includes(ciktiTuru)) {
+      fasonUygulanabilir = true
+      adetGram = adetAgirligiHesapla({
         cikti_turu: ciktiTuru,
         en_mm: parseFloat(enMm) || 0,
         boy_mm: parseFloat(boyMm) || 0,
@@ -121,31 +119,58 @@ export default function HesapMakinesiPage() {
         mamul_kg_m2: filmKgM2,
         zip_var: zipVar,
       })
-      fasonBirimFiyat = fasonFiyatBul(ciktiTuru, adetGram, fasonFiyatlar.map(f => ({
-        tur: f.tur, min_gram: Number(f.min_gram), max_gram: f.max_gram === null ? null : Number(f.max_gram), birim_fiyat_kg: Number(f.birim_fiyat_kg),
-      })))
+      if (fasonKullan) {
+        fasonBirimFiyat = fasonFiyatBul(ciktiTuru, adetGram, fasonFiyatlar.map(f => ({
+          tur: f.tur, min_gram: Number(f.min_gram), max_gram: f.max_gram === null ? null : Number(f.max_gram), birim_fiyat_kg: Number(f.birim_fiyat_kg),
+        })))
+      }
     }
+    const fasonTanimYok = fasonUygulanabilir && fasonKullan && fasonBirimFiyat === 0
+
+    // Sentetik bobin/net en cifti: sadece kenar_fire_pct'yi sabit yuzdeye
+    // esitlemek icin var, gercek mm anlami tasimiyor.
+    const sentetikNetEn = SENTETIK_BOBIN_EN_MM * (1 - fireYuzdesi / 100)
 
     const girdi: FiyatGirdisi = {
       katmanlar: katmanGirdi,
       laminasyon_sayisi: laminasyonSayisi,
       siparis_kg: parseFloat(siparisKg) || 0,
-      bobin_en_mm: katoEni,
-      kullanilabilir_en_mm: netEnHesap,
-      kenar_tirasi_mm: parseFloat(kenarTirasiMm) || 0,
-      boya_fiyat_kg: parseFloat(boyaFiyat) || 0,
-      tutkal_fiyat_kg: parseFloat(tutkalFiyat) || 0,
-      iscilik_kg: parseFloat(iscilik) || 0,
-      baslangic_fire_kg: parseFloat(baslangicFireKg) || 0,
+      bobin_en_mm: SENTETIK_BOBIN_EN_MM,
+      kullanilabilir_en_mm: sentetikNetEn,
+      kenar_tirasi_mm: 0,
+      boya_fiyat_kg: Number(parametre.boya_fiyat_kg),
+      tutkal_fiyat_kg: Number(parametre.tutkal_fiyat_kg),
+      iscilik_kg: Number(parametre.iscilik_fiyat_kg),
+      baslangic_fire_kg: Number(parametre.baslangic_fire_kg),
       kar_pct: parseFloat(karPct) || 0,
       fason_birim_fiyat_kg: fasonBirimFiyat,
     }
 
-    return hesaplaFiyat(girdi)
-  }, [katmanlar, malzemeler, fiyatlar, fasonFiyatlar, ciktiTuru, enMm, boyMm, kurekMm, siparisKg,
-      katoEni, netEnHesap, kenarTirasiMm, boyaFiyat, tutkalFiyat, iscilik, baslangicFireKg, karPct, zipVar, fasonKullan])
+    const sonuc = hesaplaFiyat(girdi)
+
+    // Adet bazli gosterim (parca urunler icin metre yerine daha anlamli)
+    let adetSayisi = 0
+    let adetBasiSatis = 0
+    if (isParca && adetGram > 0) {
+      adetSayisi = (girdi.siparis_kg * 1000) / adetGram
+      adetBasiSatis = adetSayisi > 0 ? sonuc.satis_fiyati_toplam / adetSayisi : 0
+    }
+
+    // Bobin icin gercek metre: satisci gercek bobin enini biliyor, o yuzden
+    // burada gercek deger kullaniliyor (sentetik degil).
+    let bobinMetre = 0
+    if (ciktiTuru === 'bobin') {
+      const bobinEn = parseFloat(bobinEnMm) || 0
+      bobinMetre = bobinEn > 0 ? (sonuc.net_m2 / (bobinEn / 1000)) : 0
+    }
+
+    return { sonuc, adetGram, fasonTanimYok, fasonUygulanabilir, adetSayisi, adetBasiSatis, bobinMetre }
+  }, [katmanlar, malzemeler, fiyatlar, fasonFiyatlar, parametre, ciktiTuru, enMm, boyMm, kurekMm, bobinEnMm,
+      siparisKg, karPct, zipVar, fasonKullan, isParca, fireYuzdesi])
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
+
+  const sonuc: FiyatCiktisi | null = hesap?.sonuc || null
 
   return (
     <div className="p-6 max-w-5xl">
@@ -153,7 +178,8 @@ export default function HesapMakinesiPage() {
         <div>
           <h1 className="page-title">Hizli Hesap Makinesi</h1>
           <p className="text-gray-500 text-xs mt-0.5">
-            Proje kaydi acmadan aninda maliyet/satis fiyati hesabi — ayni fiyatlama.ts motoru, Excel'e ihtiyac yok.
+            Proje kaydi acmadan aninda maliyet/satis fiyati hesabi. Kato eni, kenar tirasi gibi uretim/planlama
+            detaylarini girmene gerek yok — sadece satacagin urunun kendi olculerini gir.
           </p>
         </div>
       </div>
@@ -163,7 +189,7 @@ export default function HesapMakinesiPage() {
         <div className="space-y-4">
 
           <div className="card card-body space-y-3">
-            <div className="font-medium text-sm mb-1">Cikti ve ebatlar</div>
+            <div className="font-medium text-sm mb-1">Satilan urun</div>
             <div>
               <label className="text-xs text-gray-400">Cikti turu</label>
               <select value={ciktiTuru} onChange={e => setCiktiTuru(e.target.value as CiktiTuru)} className="w-full">
@@ -175,7 +201,7 @@ export default function HesapMakinesiPage() {
             <div className="grid grid-cols-2 gap-3">
               {ciktiTuru === 'bobin' ? (
                 <div>
-                  <label className="text-xs text-gray-400">Bobin eni (mm)</label>
+                  <label className="text-xs text-gray-400">Bobin eni (mm) — satilan urunun kendi eni</label>
                   <input type="number" value={bobinEnMm} onChange={e => setBobinEnMm(e.target.value)} />
                 </div>
               ) : (
@@ -197,19 +223,9 @@ export default function HesapMakinesiPage() {
                 </>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
-              <div>
-                <label className="text-xs text-gray-400">Kato eni (otomatik)</label>
-                <div className="font-mono text-sm py-1.5">{katoEni.toFixed(0)} mm</div>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400">Kenar tirasi (her taraf, mm)</label>
-                <input type="number" value={kenarTirasiMm} onChange={e => setKenarTirasiMm(e.target.value)} />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-gray-400">Net kullanilabilir en — otomatik {(katoEni - (parseFloat(kenarTirasiMm)||0)*2).toFixed(0)}mm, gerekirse elle degistir</label>
-                <input type="number" value={netEnManuel} onChange={e => setNetEnManuel(e.target.value)} placeholder={`${(katoEni - (parseFloat(kenarTirasiMm)||0)*2).toFixed(0)}`} />
-              </div>
+            <div className="text-xs text-gray-400 pt-2 border-t border-gray-100">
+              Kenar firesi (ortalama, Referanslar'dan): <span className="font-mono text-gray-600">%{fireYuzdesi.toFixed(1)}</span>
+              {' '}— kato eni planlama tarafindan belirlenince gercek fire orani degisebilir.
             </div>
           </div>
 
@@ -239,34 +255,18 @@ export default function HesapMakinesiPage() {
           </div>
 
           <div className="card card-body space-y-3">
-            <div className="font-medium text-sm mb-1">Siparis ve maliyet parametreleri</div>
+            <div className="font-medium text-sm mb-1">Siparis</div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-400">Siparis miktari (kg)</label>
                 <input type="number" value={siparisKg} onChange={e => setSiparisKg(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-gray-400">Baslangic firesi (kg)</label>
-                <input type="number" value={baslangicFireKg} onChange={e => setBaslangicFireKg(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400">Boya fiyati (USD/kg)</label>
-                <input type="number" step="0.01" value={boyaFiyat} onChange={e => setBoyaFiyat(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400">Tutkal fiyati (USD/kg)</label>
-                <input type="number" step="0.01" value={tutkalFiyat} onChange={e => setTutkalFiyat(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400">Iscilik (USD/kg)</label>
-                <input type="number" step="0.01" value={iscilik} onChange={e => setIscilik(e.target.value)} />
-              </div>
-              <div>
                 <label className="text-xs text-gray-400">Kar marji (%)</label>
                 <input type="number" step="0.5" value={karPct} onChange={e => setKarPct(e.target.value)} />
               </div>
             </div>
-            {['doypack', 'quadro', 'flat_bottom', 'sirt_kaynak'].includes(ciktiTuru) && (
+            {FASON_TURLERI.includes(ciktiTuru) && (
               <div className="flex items-center gap-4 pt-2 border-t border-gray-100">
                 <label className="text-xs flex items-center gap-1">
                   <input type="checkbox" checked={fasonKullan} onChange={e => setFasonKullan(e.target.checked)} /> Fason kesim maliyetini dahil et
@@ -276,24 +276,51 @@ export default function HesapMakinesiPage() {
                 </label>
               </div>
             )}
+            <div className="text-xs text-gray-400 pt-2 border-t border-gray-100 flex items-center justify-between">
+              <span>
+                Boya ${parametre ? Number(parametre.boya_fiyat_kg).toFixed(2) : '—'}/kg · Tutkal ${parametre ? Number(parametre.tutkal_fiyat_kg).toFixed(2) : '—'}/kg
+                {' '}· Iscilik ${parametre ? Number(parametre.iscilik_fiyat_kg).toFixed(2) : '—'}/kg · Baslangic firesi {parametre ? Number(parametre.baslangic_fire_kg).toFixed(0) : '—'} kg
+              </span>
+              {user?.rol === 'admin' && <Link href="/referanslar" className="text-blue-600 hover:underline whitespace-nowrap ml-2">degistir →</Link>}
+            </div>
           </div>
         </div>
 
         {/* SAG: SONUC */}
         <div className="space-y-4">
-          {!sonuc ? (
+          {!sonuc || !hesap ? (
             <div className="card card-body text-sm text-gray-400 text-center py-12">
               En az bir katmana malzeme ve mikron girince sonuc burada aninda gorunur.
             </div>
           ) : (
             <>
+              {hesap.fasonTanimYok && (
+                <div className="card card-body bg-red-50 border border-red-200 text-xs text-red-700">
+                  ⚠ Bu urun icin 1 adet agirligi ~{hesap.adetGram.toFixed(1)} g — {CIKTI_LABEL[ciktiTuru]} icin bu agirlikta
+                  tanimli fason fiyati yok, fason maliyeti $0 olarak hesaplandi. Gercek maliyet daha yuksek olabilir.
+                  {user?.rol === 'admin' ? (
+                    <> <Link href="/referanslar" className="underline font-medium">Referanslar'dan ekle →</Link></>
+                  ) : (
+                    <> Yoneticinden Referanslar sayfasina bu araligi eklemesini iste.</>
+                  )}
+                </div>
+              )}
+
               <div className="card card-body">
                 <div className="font-medium text-sm mb-3">Sonuc</div>
                 <div className="grid grid-cols-2 gap-y-2 text-sm">
-                  <span className="text-gray-400">Net m²</span><span className="text-right font-mono">{sonuc.net_m2.toLocaleString('tr-TR')}</span>
-                  <span className="text-gray-400">Metre</span><span className="text-right font-mono">{sonuc.metre.toLocaleString('tr-TR')}</span>
-                  <span className="text-gray-400">Kenar fire</span><span className="text-right font-mono">%{sonuc.kenar_fire_pct.toFixed(2)}</span>
+                  <span className="text-gray-400">Net m² (tahmini, %{fireYuzdesi.toFixed(1)} fire dahil)</span><span className="text-right font-mono">{sonuc.net_m2.toLocaleString('tr-TR')}</span>
                   <span className="text-gray-400">Mamul kg</span><span className="text-right font-mono">{sonuc.mamul_kg.toFixed(1)}</span>
+                  {ciktiTuru === 'bobin' ? (
+                    <>
+                      <span className="text-gray-400">Tahmini metre</span><span className="text-right font-mono">{hesap.bobinMetre.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                    </>
+                  ) : hesap.adetGram > 0 && (
+                    <>
+                      <span className="text-gray-400">1 adet agirligi</span><span className="text-right font-mono">{hesap.adetGram.toFixed(1)} g</span>
+                      <span className="text-gray-400">Tahmini adet sayisi</span><span className="text-right font-mono">{hesap.adetSayisi.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -311,15 +338,19 @@ export default function HesapMakinesiPage() {
                     <tr><td className="text-xs text-gray-500">Boya</td><td className="text-right font-mono text-xs">{sonuc.boya_kullanilan_kg.toFixed(2)} kg</td><td className="text-right font-mono text-xs">${sonuc.boya_tutar.toFixed(2)}</td></tr>
                     <tr><td className="text-xs text-gray-500">Tutkal</td><td className="text-right font-mono text-xs">{sonuc.tutkal_kg.toFixed(2)} kg</td><td className="text-right font-mono text-xs">${sonuc.tutkal_tutar.toFixed(2)}</td></tr>
                     <tr><td className="text-xs text-gray-500">Iscilik</td><td></td><td className="text-right font-mono text-xs">${sonuc.iscilik_tutar.toFixed(2)}</td></tr>
-                    {sonuc.fason_tutar > 0 && (
-                      <tr><td className="text-xs text-gray-500">Fason</td><td></td><td className="text-right font-mono text-xs">${sonuc.fason_tutar.toFixed(2)}</td></tr>
+                    {hesap.fasonUygulanabilir && (
+                      <tr>
+                        <td className="text-xs text-gray-500">Fason {hesap.fasonTanimYok ? '(tanimsiz)' : ''}</td>
+                        <td></td>
+                        <td className="text-right font-mono text-xs">${sonuc.fason_tutar.toFixed(2)}</td>
+                      </tr>
                     )}
                     <tr className="border-t border-gray-200">
                       <td className="text-xs font-medium">Uretim maliyeti</td><td></td>
                       <td className="text-right font-mono text-xs font-medium">${sonuc.uretim_maliyeti.toFixed(2)}</td>
                     </tr>
                     <tr><td className="text-xs text-gray-500">Baslangic fire</td><td></td><td className="text-right font-mono text-xs">${sonuc.baslangic_fire_tutar.toFixed(2)}</td></tr>
-                    <tr><td className="text-xs text-gray-500">Kenar fire</td><td></td><td className="text-right font-mono text-xs">${sonuc.kenar_fire_tutar.toFixed(2)}</td></tr>
+                    <tr><td className="text-xs text-gray-500">Kenar fire (%{fireYuzdesi.toFixed(1)}, tahmini)</td><td></td><td className="text-right font-mono text-xs">${sonuc.kenar_fire_tutar.toFixed(2)}</td></tr>
                     <tr className="border-t-2 border-gray-800">
                       <td className="text-sm font-semibold">Toplam maliyet</td><td></td>
                       <td className="text-right font-mono text-sm font-semibold">${sonuc.toplam_maliyet.toFixed(2)}</td>
@@ -332,8 +363,12 @@ export default function HesapMakinesiPage() {
                 <div className="font-medium text-sm mb-3 text-green-800">Satis fiyati (%{sonuc.kar_pct} kar)</div>
                 <div className="grid grid-cols-2 gap-y-2 text-sm">
                   <span className="text-green-700">USD/kg</span><span className="text-right font-mono font-semibold">${sonuc.satis_fiyati_kg.toFixed(4)}</span>
-                  <span className="text-green-700">USD/m²</span><span className="text-right font-mono font-semibold">${sonuc.satis_fiyati_m2.toFixed(4)}</span>
-                  <span className="text-green-700">USD/metre</span><span className="text-right font-mono font-semibold">${sonuc.satis_fiyati_metre.toFixed(4)}</span>
+                  {isParca && hesap.adetBasiSatis > 0 && (
+                    <><span className="text-green-700">USD/adet</span><span className="text-right font-mono font-semibold">${hesap.adetBasiSatis.toFixed(4)}</span></>
+                  )}
+                  {ciktiTuru === 'bobin' && hesap.bobinMetre > 0 && (
+                    <><span className="text-green-700">USD/metre</span><span className="text-right font-mono font-semibold">${(sonuc.satis_fiyati_toplam / hesap.bobinMetre).toFixed(4)}</span></>
+                  )}
                   <span className="text-green-700">Toplam</span><span className="text-right font-mono font-semibold">${sonuc.satis_fiyati_toplam.toFixed(2)}</span>
                   <span className="text-green-700">Kar tutari</span><span className="text-right font-mono font-semibold">${sonuc.kar_tutar.toFixed(2)}</span>
                 </div>
