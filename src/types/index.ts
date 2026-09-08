@@ -174,6 +174,7 @@ export interface UretimPlani {
   planlanan_sure_dk?: number
   hammadde_hazir: boolean
   durum: string
+  notlar?: string
   proje?: Proje
   makine?: Makine
 }
@@ -198,7 +199,10 @@ export interface UretimAdim {
   kenar_fire_kg?: number
   durus_dk: number
   durus_neden?: string
+  kurleme_baslangic?: string
+  kurleme_bitis?: string
   qr_kod?: string
+  notlar?: string
 }
 
 // Rota hesaplama yardımcısı

@@ -36,6 +36,19 @@ export async function yeniPlanNo(): Promise<string> {
   return `PLN-${new Date().getFullYear()}-${String(no).padStart(4,'0')}`
 }
 
+// Depoya yeni bir parti girerken (tedarikci + malzeme secilince) onerilen
+// lot kodu — kullanici isterse elle degistirebilir. Format:
+// {TEDARIKCI_KOD}-{MALZEME_KOD}-{YYMMDD}-{sira}
+export async function otomatikLotNo(tedarikciKod: string | null | undefined, malzemeKod: string | null | undefined): Promise<string> {
+  const { data } = await supabase.rpc('nextval', { sequence_name: 'lot_no_seq' }).single()
+  const no = data || Math.floor(Math.random() * 900) + 100
+  const t = new Date()
+  const tarihStr = `${String(t.getFullYear()).slice(2)}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}`
+  const tedKod = (tedarikciKod || 'TED').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'TED'
+  const malKod = (malzemeKod || 'MLZ').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'MLZ'
+  return `${tedKod}-${malKod}-${tarihStr}-${String(no).padStart(3, '0')}`
+}
+
 // NOT: Eski/kullanılmayan fiyatHesapla() fonksiyonu buradan kaldırıldı
 // (2026-08-14). lib/fiyatlama.ts'deki hesaplaFiyat() tek fiyatlama
 // motoru olarak kullanılıyor — iki paralel motor kafa karışıklığı ve

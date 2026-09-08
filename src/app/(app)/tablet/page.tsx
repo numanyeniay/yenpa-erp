@@ -1,14 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-
-const ADIM_LABEL: Record<string, string> = {
-  baski: 'Baski', laminasyon_1: 'Laminasyon 1', laminasyon_2: 'Laminasyon 2', laminasyon_3: 'Laminasyon 3',
-  kurleme_1: 'Kurleme 1', kurleme_2: 'Kurleme 2', kurleme_3: 'Kurleme 3',
-  dilimleme: 'Dilimleme', katlama: 'Katlama', yan_kesim: 'Yan Kesim',
-  doypack: 'Doypack', quadro: 'Quadro', flat_bottom: 'Flat Bottom',
-  sirt_kaynak: 'Sirt Kaynak', sonic: 'Sonic', diger: 'Diger',
-}
+import { ADIM_LABEL } from '@/lib/uretimAkis'
+import BobinGirisFormu from '@/components/BobinGirisFormu'
 
 // Operatorlerin sahada kullanacagi, buyuk butonlu, minimum yazi ile
 // hizli baslat/bitir arayuzu. Bir makine secip o makinenin sirasi
@@ -21,7 +15,6 @@ export default function TabletPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [bitirEkrani, setBitirEkrani] = useState(false)
-  const [form, setForm] = useState({ uretilen_metre: '', uretilen_kg: '', durus_dk: '0' })
 
   useEffect(() => { load() }, [])
   useEffect(() => { if (secilenMakine) loadMakinePlani() }, [secilenMakine])
@@ -62,24 +55,9 @@ export default function TabletPage() {
     loadMakinePlani()
   }
 
-  async function bitir() {
-    if (!aktifAdim || !guncelIs) return
-    setSaving(true)
-    const bitis = new Date()
-    const baslangic = new Date(aktifAdim.baslangic)
-    const sureDk = Math.max(1, Math.round((bitis.getTime() - baslangic.getTime()) / 60000))
-    const metre = parseFloat(form.uretilen_metre) || 0
-    await supabase.from('uretim_adim').update({
-      bitis: bitis.toISOString(), sure_dk: sureDk,
-      uretilen_metre: metre || null, uretilen_kg: parseFloat(form.uretilen_kg) || null,
-      hiz_m_dk: sureDk > 0 ? metre / sureDk : null,
-      durus_dk: parseInt(form.durus_dk) || 0,
-    }).eq('id', aktifAdim.id)
-    await supabase.from('uretim_plani').update({ durum: 'tamamlandi' }).eq('id', guncelIs.id)
-    setForm({ uretilen_metre: '', uretilen_kg: '', durus_dk: '0' })
+  function bitirTamamlandi() {
     setBitirEkrani(false)
     setAktifAdim(null)
-    setSaving(false)
     loadMakinePlani()
   }
 
@@ -138,28 +116,19 @@ export default function TabletPage() {
         </div>
       )}
 
-      {guncelIs && bitirEkrani && (
-        <div className="card card-body py-8 space-y-5">
+      {guncelIs && bitirEkrani && aktifAdim && (
+        <div className="card card-body py-6">
           <div className="text-2xl font-bold text-gray-900 text-center mb-4">Uretim Bilgileri</div>
-          <div>
-            <label className="!text-base">Uretilen metre</label>
-            <input type="number" autoFocus value={form.uretilen_metre} onChange={e => setForm(f => ({ ...f, uretilen_metre: e.target.value }))}
-              className="!text-2xl !py-4 text-center" />
-          </div>
-          <div>
-            <label className="!text-base">Uretilen kg</label>
-            <input type="number" value={form.uretilen_kg} onChange={e => setForm(f => ({ ...f, uretilen_kg: e.target.value }))}
-              className="!text-2xl !py-4 text-center" />
-          </div>
-          <div>
-            <label className="!text-base">Durus suresi (dk, varsa)</label>
-            <input type="number" value={form.durus_dk} onChange={e => setForm(f => ({ ...f, durus_dk: e.target.value }))}
-              className="!text-2xl !py-4 text-center" />
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button onClick={() => setBitirEkrani(false)} className="flex-1 py-4 rounded-xl border border-gray-200 text-lg font-medium">Geri</button>
-            <button onClick={bitir} disabled={saving} className="flex-1 py-4 rounded-xl bg-blue-600 text-white text-lg font-bold disabled:opacity-50">Tamamla</button>
-          </div>
+          <BobinGirisFormu
+            projeId={guncelIs.proje_id}
+            planId={guncelIs.id}
+            adimId={aktifAdim.id}
+            adimSira={guncelIs.adim_sira}
+            adimTur={guncelIs.adim_tur}
+            baslangic={aktifAdim.baslangic}
+            onTamamla={bitirTamamlandi}
+            onIptal={() => setBitirEkrani(false)}
+          />
         </div>
       )}
     </div>

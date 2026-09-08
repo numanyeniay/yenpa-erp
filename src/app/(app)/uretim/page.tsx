@@ -1,14 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-
-const ADIM_LABEL: Record<string, string> = {
-  baski: 'Baski', laminasyon_1: 'Laminasyon 1', laminasyon_2: 'Laminasyon 2', laminasyon_3: 'Laminasyon 3',
-  kurleme_1: 'Kurleme 1', kurleme_2: 'Kurleme 2', kurleme_3: 'Kurleme 3',
-  dilimleme: 'Dilimleme', katlama: 'Katlama', yan_kesim: 'Yan Kesim',
-  doypack: 'Doypack', quadro: 'Quadro', flat_bottom: 'Flat Bottom',
-  sirt_kaynak: 'Sirt Kaynak', sonic: 'Sonic', diger: 'Diger',
-}
+import { ADIM_LABEL } from '@/lib/uretimAkis'
+import BobinGirisFormu from '@/components/BobinGirisFormu'
 
 export default function UretimPage() {
   const [tab, setTab] = useState<'aktif'|'gecmis'>('aktif')
@@ -42,31 +36,10 @@ export default function UretimPage() {
     setSaving(false)
   }
 
-  async function bitir() {
-    if (!bitirForm) return
-    setSaving(true); setMsg('')
-    const bitis = new Date()
-    const baslangic = new Date(bitirForm.adim.baslangic)
-    const sureDk = Math.max(1, Math.round((bitis.getTime() - baslangic.getTime()) / 60000))
-    const uretilenMetre = parseFloat(bitirForm.uretilen_metre) || 0
-    const hizMDk = sureDk > 0 ? uretilenMetre / sureDk : 0
-
-    const { error: e1 } = await supabase.from('uretim_adim').update({
-      bitis: bitis.toISOString(), sure_dk: sureDk,
-      uretilen_metre: uretilenMetre || null,
-      uretilen_kg: parseFloat(bitirForm.uretilen_kg) || null,
-      hiz_m_dk: hizMDk || null,
-      uretim_fire_kg: parseFloat(bitirForm.uretim_fire_kg) || null,
-      kenar_fire_kg: parseFloat(bitirForm.kenar_fire_kg) || null,
-      durus_dk: parseInt(bitirForm.durus_dk) || 0,
-      durus_neden: bitirForm.durus_neden || null,
-    }).eq('id', bitirForm.adim.id)
-    if (e1) { setMsg('Hata: ' + e1.message); setSaving(false); return }
-
-    await supabase.from('uretim_plani').update({ durum: 'tamamlandi' }).eq('id', bitirForm.plan.id)
-    setMsg('Uretim adimi tamamlandi.'); load()
+  function bitirTamamlandi() {
+    setMsg('Uretim adimi tamamlandi.')
     setBitirForm(null)
-    setSaving(false)
+    load()
   }
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
@@ -107,22 +80,20 @@ export default function UretimPage() {
                 )}
                 {p.durum === 'calisiyor' && calisanAdim && (
                   bitirForm?.adim.id === calisanAdim.id ? (
-                    <div className="mt-2 space-y-2 bg-gray-50 rounded-lg p-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><label>Uretilen metre</label><input type="number" value={bitirForm.uretilen_metre} onChange={e => setBitirForm((f: any) => ({ ...f, uretilen_metre: e.target.value }))} /></div>
-                        <div><label>Uretilen kg</label><input type="number" value={bitirForm.uretilen_kg} onChange={e => setBitirForm((f: any) => ({ ...f, uretilen_kg: e.target.value }))} /></div>
-                        <div><label>Uretim firesi (kg)</label><input type="number" value={bitirForm.uretim_fire_kg} onChange={e => setBitirForm((f: any) => ({ ...f, uretim_fire_kg: e.target.value }))} /></div>
-                        <div><label>Kenar firesi (kg)</label><input type="number" value={bitirForm.kenar_fire_kg} onChange={e => setBitirForm((f: any) => ({ ...f, kenar_fire_kg: e.target.value }))} /></div>
-                        <div><label>Durus (dk)</label><input type="number" value={bitirForm.durus_dk} onChange={e => setBitirForm((f: any) => ({ ...f, durus_dk: e.target.value }))} /></div>
-                        <div><label>Durus nedeni</label><input value={bitirForm.durus_neden} onChange={e => setBitirForm((f: any) => ({ ...f, durus_neden: e.target.value }))} /></div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={bitir} disabled={saving} className="btn btn-primary btn-sm flex-1 justify-center">Tamamla</button>
-                        <button onClick={() => setBitirForm(null)} className="btn btn-sm">Iptal</button>
-                      </div>
+                    <div className="mt-2 bg-gray-50 rounded-lg p-3">
+                      <BobinGirisFormu
+                        projeId={p.proje_id}
+                        planId={p.id}
+                        adimId={calisanAdim.id}
+                        adimSira={p.adim_sira}
+                        adimTur={p.adim_tur}
+                        baslangic={calisanAdim.baslangic}
+                        onTamamla={bitirTamamlandi}
+                        onIptal={() => setBitirForm(null)}
+                      />
                     </div>
                   ) : (
-                    <button onClick={() => setBitirForm({ plan: p, adim: calisanAdim, uretilen_metre: '', uretilen_kg: '', uretim_fire_kg: '', kenar_fire_kg: '', durus_dk: '0', durus_neden: '' })}
+                    <button onClick={() => setBitirForm({ plan: p, adim: calisanAdim })}
                       className="btn btn-primary btn-sm w-full justify-center mt-2">Uretimi bitir</button>
                   )
                 )}

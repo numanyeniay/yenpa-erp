@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, otomatikLotNo } from '@/lib/supabase'
 
 const HAREKET_TURLERI = [
   { v: 'giris',   l: 'Giris (stok artar)' },
@@ -10,8 +10,15 @@ const HAREKET_TURLERI = [
   { v: 'serbest', l: 'Serbest birak (rezerve iptali)' },
 ]
 
+// Excel "Tum Stoklar" sekmesindeki malzeme adlarini malzeme_tanim.kod'una esler
+const MALZEME_ESANLAMLI: Record<string, string> = {
+  'PE': 'PE', 'OPP': 'OPP', 'CPP': 'CPP', 'PET': 'PET',
+  'MET PET': 'MPET', 'MAT OPP': 'MATOPP', 'MATOPP': 'MATOPP',
+  'PE + MET PET': 'PE+METPET', 'PE+MET PET': 'PE+METPET',
+}
+
 export default function DepoPage() {
-  const [tab, setTab] = useState<'stok'|'hareket'|'ise-gore'>('stok')
+  const [tab, setTab] = useState<'stok'|'hareket'|'ise-gore'|'fiziksel'>('stok')
   const [stoklar, setStoklar] = useState<any[]>([])
   const [malzemeler, setMalzemeler] = useState<any[]>([])
   const [tedarikciler, setTedarikciler] = useState<any[]>([])
@@ -21,6 +28,10 @@ export default function DepoPage() {
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [filtreMalzeme, setFiltreMalzeme] = useState('')
+  const [filtreKonum, setFiltreKonum] = useState('')
+  const [iceAktarYukleniyor, setIceAktarYukleniyor] = useState(false)
+  const [iceAktarMsg, setIceAktarMsg] = useState('')
+  const [iceAktarOnizleme, setIceAktarOnizleme] = useState<{ satir: number, eslesmeyen: string[], veriler: any[] } | null>(null)
 
   const [yeniStok, setYeniStok] = useState({
     malzeme_id: '', tedarikci_id: '', lot_no: '', mikron: '', en_mm: '',
@@ -50,6 +61,13 @@ export default function DepoPage() {
     malzemeToplam[s.malzeme_id] = (malzemeToplam[s.malzeme_id] || 0) + (s.agirlik_kg || 0)
   }
   const kritikMalzemeler = malzemeler.filter(m => m.min_stok_kg && (malzemeToplam[m.id] || 0) < m.min_stok_kg)
+
+  async function lotNoOner() {
+    const malzeme = malzemeler.find(m => m.id === yeniStok.malzeme_id)
+    const tedarikci = tedarikciler.find(t => t.id === yeniStok.tedarikci_id)
+    const lot = await otomatikLotNo(tedarikci?.kod, malzeme?.kod)
+    setYeniStok(p => ({ ...p, lot_no: lot }))
+  }
 
   async function stokEkle() {
     setSaving(true); setMsg('')
@@ -121,7 +139,85 @@ export default function DepoPage() {
     setSaving(false)
   }
 
+  // Fiziksel depo (konum bazli) Excel'den ice aktarma
+  async function excelDosyaOku(file: File) {
+    setIceAktarMsg(''); setIceAktarOnizleme(null); setIceAktarYukleniyor(true)
+    try {
+      const XLSX = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const sheetName = wb.SheetNames.includes('Tüm Stoklar') ? 'Tüm Stoklar' : wb.SheetNames[0]
+      const ws = wb.Sheets[sheetName]
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })
+      const headerIdx = rows.findIndex(r => r[0] === 'Konum' && r[3] === 'Malzeme')
+      if (headerIdx === -1) {
+        setIceAktarMsg('Beklenen sutun basliklari bulunamadi (Konum, Palet, Durum, Malzeme, En (cm), Mikron / Yapi, Agirlik (kg), Aciklama). Dosya sablonu farkli olabilir.')
+        setIceAktarYukleniyor(false); return
+      }
+      const dataRows = rows.slice(headerIdx + 1).filter(r => r[0] || r[3])
+      const konumSayac: Record<string, number> = {}
+      const eslesmeyen = new Set<string>()
+      const parsed: any[] = []
+      for (const r of dataRows) {
+        const [konum, palet, durum, malzemeAdi, en, mikronYapi, kg, aciklama] = r
+        if (!malzemeAdi) continue
+        const kod = MALZEME_ESANLAMLI[String(malzemeAdi).trim()]
+        const malzeme = kod
+          ? malzemeler.find(m => m.kod === kod)
+          : malzemeler.find(m => (m.ad || '').toLowerCase() === String(malzemeAdi).trim().toLowerCase())
+        if (!malzeme) { eslesmeyen.add(String(malzemeAdi)); continue }
+        const k = konum || 'BILINMIYOR'
+        konumSayac[k] = (konumSayac[k] || 0) + 1
+        const mikronNum = typeof mikronYapi === 'number' ? mikronYapi : null
+        const aciklamaParts: string[] = []
+        if (mikronYapi && typeof mikronYapi !== 'number') aciklamaParts.push(`Yapi: ${mikronYapi}`)
+        if (aciklama) aciklamaParts.push(String(aciklama))
+        parsed.push({
+          malzeme_id: malzeme.id,
+          lot_no: `EXCEL-${k}-${konumSayac[k]}`,
+          mikron: mikronNum,
+          en_mm: typeof en === 'number' ? Math.round(en * 10) : null,
+          agirlik_kg: typeof kg === 'number' ? kg : 0,
+          konum: konum || null,
+          palet_no: palet || null,
+          durum: durum || null,
+          aciklama: aciklamaParts.length ? aciklamaParts.join('; ') : null,
+          kaynak: 'excel_import',
+        })
+      }
+      setIceAktarOnizleme({ satir: parsed.length, eslesmeyen: Array.from(eslesmeyen), veriler: parsed })
+    } catch (e: any) {
+      setIceAktarMsg('Dosya okunamadi: ' + e.message)
+    }
+    setIceAktarYukleniyor(false)
+  }
+
+  async function excelOnayla() {
+    if (!iceAktarOnizleme) return
+    setIceAktarYukleniyor(true)
+    await supabase.from('depo_stok').delete().eq('kaynak', 'excel_import')
+    const { error } = await supabase.from('depo_stok').insert(iceAktarOnizleme.veriler)
+    if (error) {
+      setIceAktarMsg('Hata: ' + error.message)
+    } else {
+      setIceAktarMsg(`${iceAktarOnizleme.veriler.length} kayit ice aktarildi (onceki Excel verisinin yerine gecti).`)
+      setIceAktarOnizleme(null)
+      load()
+    }
+    setIceAktarYukleniyor(false)
+  }
+
   const gorunenStoklar = filtreMalzeme ? stoklar.filter(s => s.malzeme_id === filtreMalzeme) : stoklar
+  const fizikselStoklar = stoklar.filter(s => s.konum)
+  const fizikselGorunen = filtreKonum ? fizikselStoklar.filter(s => s.konum === filtreKonum) : fizikselStoklar
+  const konumlar = Array.from(new Set(fizikselStoklar.map(s => s.konum))).sort()
+  const fizikselMalzemeOzet: Record<string, number> = {}
+  for (const s of fizikselStoklar) {
+    const ad = s.malzeme?.ad || 'Bilinmeyen'
+    fizikselMalzemeOzet[ad] = (fizikselMalzemeOzet[ad] || 0) + (Number(s.agirlik_kg) || 0)
+  }
+  const fizikselToplamKg = fizikselStoklar.reduce((t, s) => t + (Number(s.agirlik_kg) || 0), 0)
+  const kontrolGerektirenler = fizikselStoklar.filter(s => s.aciklama)
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
 
@@ -148,7 +244,7 @@ export default function DepoPage() {
       )}
 
       <div className="flex gap-0 mb-6 border-b border-gray-200">
-        {[{ k: 'stok', l: 'Stok Listesi' }, { k: 'hareket', l: 'Hareketler' }, { k: 'ise-gore', l: 'Ise Gore Stok Durumu' }].map(t => (
+        {[{ k: 'stok', l: 'Stok Listesi' }, { k: 'hareket', l: 'Hareketler' }, { k: 'ise-gore', l: 'Ise Gore Stok Durumu' }, { k: 'fiziksel', l: 'Fiziksel Depo (Konum)' }].map(t => (
           <button key={t.k} onClick={() => { setTab(t.k as any); setMsg('') }}
             className={`px-5 py-2.5 text-sm border-b-2 -mb-px transition-colors ${tab === t.k ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {t.l}
@@ -164,7 +260,10 @@ export default function DepoPage() {
               <div className="grid grid-cols-4 gap-3 items-end mb-3">
                 <div className="col-span-2">
                   <label>Malzeme</label>
-                  <select value={yeniStok.malzeme_id} onChange={e => setYeniStok(p => ({ ...p, malzeme_id: e.target.value }))}>
+                  <select value={yeniStok.malzeme_id} onChange={e => {
+                    const malzeme_id = e.target.value
+                    setYeniStok(p => ({ ...p, malzeme_id }))
+                  }}>
                     <option value="">Secin...</option>
                     {malzemeler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}
                   </select>
@@ -178,7 +277,10 @@ export default function DepoPage() {
                 </div>
                 <div>
                   <label>Lot no</label>
-                  <input value={yeniStok.lot_no} onChange={e => setYeniStok(p => ({ ...p, lot_no: e.target.value }))} placeholder="LOT-2026-001" />
+                  <div className="flex gap-1">
+                    <input value={yeniStok.lot_no} onChange={e => setYeniStok(p => ({ ...p, lot_no: e.target.value }))} placeholder="Otomatik olustur'a basin" />
+                    <button type="button" onClick={lotNoOner} disabled={!yeniStok.malzeme_id} className="btn btn-sm flex-shrink-0" title="Tedarikci + malzemeden otomatik lot kodu oner">Otomatik</button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-6 gap-3 items-end">
@@ -366,6 +468,125 @@ export default function DepoPage() {
               )
             })
           })()}
+        </div>
+      )}
+
+      {tab === 'fiziksel' && (
+        <div className="space-y-4">
+          <div className="card">
+            <div className="card-header"><span className="font-medium text-sm">Excel'den ice aktar</span></div>
+            <div className="card-body space-y-3">
+              <p className="text-xs text-gray-500">
+                Depo sayim Excel dosyanizi ("Konum, Palet, Durum, Malzeme, En (cm), Mikron / Yapi, Agirlik (kg), Aciklama" sutunlu "Tum Stoklar" sekmesi) secin.
+                Onaylarsaniz, daha once Excel'den aktarilmis kayitlarin yerine yenileri gecer — elle girilen diger stok kayitlariniz etkilenmez.
+              </p>
+              <input type="file" accept=".xlsx,.xls" onChange={e => { const f = e.target.files?.[0]; if (f) excelDosyaOku(f) }} />
+              {iceAktarYukleniyor && <p className="text-sm text-gray-400">Isleniyor...</p>}
+              {iceAktarMsg && <p className={`text-sm ${iceAktarMsg.startsWith('Hata') || iceAktarMsg.startsWith('Beklenen') || iceAktarMsg.startsWith('Dosya okunamadi') ? 'text-red-600' : 'text-green-600'}`}>{iceAktarMsg}</p>}
+              {iceAktarOnizleme && (
+                <div className="bg-blue-50 rounded-lg px-4 py-3 text-sm space-y-2">
+                  <div><strong>{iceAktarOnizleme.satir}</strong> satir okundu ve eslesti.</div>
+                  {iceAktarOnizleme.eslesmeyen.length > 0 && (
+                    <div className="text-amber-700">
+                      Eslesmeyen malzeme adlari (bu satirlar aktarilmayacak): {iceAktarOnizleme.eslesmeyen.join(', ')}.
+                      Once Malzemeler sayfasindan bu isimlerle bir malzeme tanimi ekleyip tekrar deneyin.
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={excelOnayla} disabled={iceAktarYukleniyor} className="btn btn-primary btn-sm">Onayla ve ice aktar</button>
+                    <button onClick={() => setIceAktarOnizleme(null)} className="btn btn-sm">Vazgec</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {fizikselStoklar.length > 0 && (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="card card-body">
+                  <div className="text-xs text-gray-400 mb-1">Toplam kayit</div>
+                  <div className="text-2xl font-semibold">{fizikselStoklar.length}</div>
+                </div>
+                <div className="card card-body">
+                  <div className="text-xs text-gray-400 mb-1">Toplam bilinen stok</div>
+                  <div className="text-2xl font-semibold">{fizikselToplamKg.toFixed(0)} kg</div>
+                </div>
+                <div className="card card-body">
+                  <div className="text-xs text-gray-400 mb-1">Kontrol gerektiren kayit</div>
+                  <div className={`text-2xl font-semibold ${kontrolGerektirenler.length > 0 ? 'text-amber-600' : ''}`}>{kontrolGerektirenler.length}</div>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header"><span className="font-medium text-sm">Malzeme bazinda toplam</span></div>
+                <div className="card-body">
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(fizikselMalzemeOzet).sort((a, b) => b[1] - a[1]).map(([ad, kg]) => (
+                      <span key={ad} className="badge badge-blue">{ad}: {kg.toFixed(0)} kg</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {kontrolGerektirenler.length > 0 && (
+                <div className="card">
+                  <div className="card-header bg-amber-50"><span className="font-medium text-sm text-amber-800">Kontrol gerektirenler ({kontrolGerektirenler.length})</span></div>
+                  <div className="card-body">
+                    <div className="space-y-1.5">
+                      {kontrolGerektirenler.map(s => (
+                        <div key={s.id} className="text-xs text-amber-800 flex gap-2">
+                          <span className="font-mono text-amber-500">{s.konum} / {s.palet_no}</span>
+                          <span>{s.malzeme?.ad}</span>
+                          <span className="text-amber-600">— {s.aciklama}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <label className="!mb-0">Konuma gore filtrele:</label>
+                <select className="!w-48" value={filtreKonum} onChange={e => setFiltreKonum(e.target.value)}>
+                  <option value="">Tumu</option>
+                  {konumlar.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </div>
+
+              <div className="card p-0 overflow-hidden">
+                <table className="table-base">
+                  <thead>
+                    <tr>
+                      <th>Konum</th><th>Palet</th><th>Durum</th><th>Malzeme</th>
+                      <th>En</th><th>Mikron / Yapi</th><th>Agirlik (kg)</th><th>Aciklama</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fizikselGorunen.map(s => (
+                      <tr key={s.id}>
+                        <td className="font-mono text-xs">{s.konum}</td>
+                        <td className="text-gray-500 text-xs">{s.palet_no}</td>
+                        <td>{s.durum ? <span className="badge badge-gray text-xs">{s.durum}</span> : '—'}</td>
+                        <td className="font-medium">{s.malzeme?.ad}</td>
+                        <td>{s.en_mm ? (s.en_mm / 10) + ' cm' : '—'}</td>
+                        <td>{s.mikron ? s.mikron + ' mic' : '—'}</td>
+                        <td className="font-semibold">{Number(s.agirlik_kg).toFixed(0)}</td>
+                        <td className="text-gray-400 text-xs">{s.aciklama || '—'}</td>
+                      </tr>
+                    ))}
+                    {fizikselGorunen.length === 0 && <tr><td colSpan={8} className="text-center text-gray-400 py-8">Kayit yok</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {fizikselStoklar.length === 0 && !iceAktarOnizleme && (
+            <div className="card card-body text-center text-gray-400 text-sm py-10">
+              Henuz fiziksel depo verisi yok. Yukaridan Excel dosyanizi yukleyerek baslayin.
+            </div>
+          )}
         </div>
       )}
     </div>

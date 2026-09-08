@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 export default function RaporlarPage() {
   const [loading, setLoading] = useState(true)
@@ -11,17 +12,24 @@ export default function RaporlarPage() {
   const [stokDegeri, setStokDegeri] = useState(0)
   const [acikPO, setAcikPO] = useState<any[]>([])
   const [proformaToplam, setProformaToplam] = useState(0)
+  const [planlanmamisIsler, setPlanlanmamisIsler] = useState<any[]>([])
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: projeler }, { data: proformalar }, { data: adimlar }, { data: stoklar }, { data: pos }] = await Promise.all([
+    const [{ data: projeler }, { data: proformalar }, { data: adimlar }, { data: stoklar }, { data: pos }, { data: onayliProjeler }, { data: planlar }] = await Promise.all([
       supabase.from('proje').select('durum, musteri:musteri_tanim(ad)'),
       supabase.from('proforma').select('toplam_tutar, durum'),
       supabase.from('uretim_adim').select('*, makine:makine_tanim(ad,hedef_hiz_m_dk)').not('bitis', 'is', null),
       supabase.from('depo_stok').select('*, malzeme:malzeme_tanim(ad,min_stok_kg)'),
       supabase.from('satinalma_siparis').select('*, tedarikci:tedarikci_tanim(ad)').not('durum', 'in', '(teslim_alindi,iptal)'),
+      supabase.from('proje').select('id, proje_no, ad, cikti_turu, olusturma, musteri:musteri_tanim(ad)').eq('durum', 'musteri_onayladi').order('olusturma'),
+      supabase.from('uretim_plani').select('proje_id'),
     ])
+
+    // Planlamasi yapilmamis isler: siparisi onaylanmis ama henuz uretim plani olusturulmamis projeler
+    const planiOlanIdler = new Set((planlar || []).map((p: any) => p.proje_id))
+    setPlanlanmamisIsler((onayliProjeler || []).filter((p: any) => !planiOlanIdler.has(p.id)))
 
     // Proje durum dagilimi
     const pd: Record<string, number> = {}
@@ -98,6 +106,27 @@ export default function RaporlarPage() {
           <div className={`stat-val ${acikPO.length > 0 ? 'text-amber-600' : ''}`}>{acikPO.length}</div>
         </div>
       </div>
+
+      {planlanmamisIsler.length > 0 && (
+        <div className="card mb-6">
+          <div className="card-header">
+            <span className="font-medium text-sm">Planlamasi yapilmamis isler</span>
+            <span className="badge badge-red">{planlanmamisIsler.length}</span>
+          </div>
+          <div className="card-body space-y-2">
+            {planlanmamisIsler.map((p: any) => (
+              <Link key={p.id} href={`/projeler/${p.id}`}
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-red-50 border border-red-100 no-underline hover:bg-red-100">
+                <div>
+                  <span className="font-medium text-sm text-gray-900">{p.ad}</span>
+                  <span className="text-xs text-gray-500 ml-2">{p.musteri?.ad} · <span className="font-mono">{p.proje_no}</span> · {p.cikti_turu}</span>
+                </div>
+                <span className="text-xs text-gray-400">{new Date(p.olusturma).toLocaleDateString('tr-TR')}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-6 mb-6">
         <div className="card">

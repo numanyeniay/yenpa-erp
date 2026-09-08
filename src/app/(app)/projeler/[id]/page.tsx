@@ -4,7 +4,58 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, KAZAN_CAPLARI, fotoselHesapla, type FiyatGirdisi } from '@/lib/fiyatlama'
-import { yeniProformaNo } from '@/lib/supabase'
+import { yeniProformaNo, yeniPoNo } from '@/lib/supabase'
+import { useAuth } from '@/lib/auth'
+
+// Siparis onaylandiginda (musteri_onayladi ve sonrasi) stok kontrolu bu durumlarda calisir.
+const STOK_KONTROL_DURUMLARI = ['musteri_onayladi', 'uretimde', 'tamamlandi']
+// Genis bobin, dilimlenerek daraltilabilir: ihtiyac duyulan enin en fazla %10 uzeri kabul edilir.
+const EN_TOLERANS_PCT = 10
+
+// Bir siparis icin katman basina gereken ham malzeme miktarini (kg) hesaplar.
+// Hem sayfa yuklenirken (otomatik satin alma kontrolu) hem render sirasinda (Stok durumu karti)
+// ayni mantikla kullanilabilsin diye component disinda, parametreye bagli saf bir fonksiyon.
+function hesaplaGerekliMiktarlar(p: any, kats: any[], tekliflerListesi: any[], proformalarListesi: any[]) {
+  if (!p?.kato_eni_mm || kats.length === 0) return []
+
+  const onayli = proformalarListesi.find((pf: any) => pf.durum === 'onaylandi')
+  const kaynakProforma = onayli || proformalarListesi[0]
+  let miktarKg = 0
+  let toleransPct = 0
+  if (kaynakProforma) {
+    miktarKg = Number(kaynakProforma.secilen_miktar_kg) || 0
+    toleransPct = Number(kaynakProforma.tolerans_pct) || 0
+  } else if (tekliflerListesi[0]) {
+    miktarKg = Number(tekliflerListesi[0].miktar_kg) || 0
+    toleransPct = Number(tekliflerListesi[0].tolerans_pct) || 0
+  }
+  if (miktarKg <= 0) return []
+
+  // En yakin miktarli proje_fiyat kaydinin kenar fire oranini kullan (net en'i geri hesaplamak icin)
+  const enYakinTeklif = tekliflerListesi.length > 0
+    ? tekliflerListesi.reduce((best: any, t: any) =>
+        Math.abs(Number(t.miktar_kg) - miktarKg) < Math.abs(Number(best.miktar_kg) - miktarKg) ? t : best)
+    : null
+  const fireOrani = enYakinTeklif ? Number(enYakinTeklif.fire_orani_pct) || 0 : 0
+  const netEn = p.kato_eni_mm * (1 - fireOrani / 100)
+  // Tolerans dahil en kotu senaryoya gore ham madde ayir (eksik kalmasin diye)
+  const gerekliToplamKg = miktarKg * (1 + toleransPct / 100)
+
+  const lam = kats.filter((k: any) => k.laminasyon_onceki).length
+  const baskili = kats.some((k: any) => k.baskili)
+  const katmanGirdileri = kats.map((k: any) => ({
+    malzeme_adi: k.malzeme?.ad || '', malzeme_tur: k.malzeme?.tur || '',
+    mikron: k.mikron, yogunluk: k.malzeme?.yogunluk || 0.92, birim_fiyat: 0, baskili: k.baskili,
+  }))
+  const sonuc = hesaplaFiyat({
+    katmanlar: katmanGirdileri, laminasyon_sayisi: lam, siparis_kg: gerekliToplamKg,
+    bobin_en_mm: p.kato_eni_mm, kullanilabilir_en_mm: netEn, kenar_tirasi_mm: 0,
+    boya_fiyat_kg: 0, tutkal_fiyat_kg: 0, iscilik_kg: 0, baslangic_fire_kg: 0, kar_pct: 0, fason_birim_fiyat_kg: 0,
+  })
+  return sonuc.katmanlar.map((kd, i) => ({
+    malzeme_id: kats[i].malzeme_id, mikron: kats[i].mikron, malzeme_adi: kd.malzeme_adi, gerekli_kg: kd.toplam_kg,
+  }))
+}
 
 const DURUM_BADGE: Record<string,string> = {
   taslak:'badge-gray', fiyatlama:'badge-blue',
@@ -33,7 +84,7 @@ const ADIM_LABEL: Record<string,string> = {
   sirt_kaynak:'Sirt Kaynak (Fason)', sonic:'Sonic',
 }
 
-const MIKTARLAR = [500, 1000, 3000]
+const VARSAYILAN_MIKTARLAR = [500, 1000, 3000]
 
 export default function ProjeDetayPage() {
   const { id } = useParams()
@@ -50,6 +101,11 @@ export default function ProjeDetayPage() {
   const [msg, setMsg] = useState('')
   const [proformalar, setProformalar] = useState<any[]>([])
   const [proformaOlusturuluyor, setProformaOlusturuluyor] = useState<string | null>(null)
+  const { user } = useAuth()
+  const [depoStok, setDepoStok] = useState<any[]>([])
+  const [satinalmaKalemleri, setSatinalmaKalemleri] = useState<any[]>([])
+  const [rezerveEdiliyor, setRezerveEdiliyor] = useState<string | null>(null)
+  const [baglanmisLotlar, setBaglanmisLotlar] = useState<Set<string>>(new Set())
 
   // Fiyat parametreleri
   const [hamBobin, setHamBobin] = useState('')
@@ -61,6 +117,12 @@ export default function ProjeDetayPage() {
   const [tutkalFiyat, setTutkalFiyat] = useState('4.50')
   const [iscilik, setIscilik] = useState('0.50')
   const [karPct, setKarPct] = useState('25')
+  const [toleransPct, setToleransPct] = useState('15')
+
+  // Hesaplanacak miktarlar (kg) — standart 3 kademe + musterinin istedigi ozel miktar(lar)
+  const [miktarlar, setMiktarlar] = useState<number[]>(VARSAYILAN_MIKTARLAR)
+  const [ozelMiktarDeger, setOzelMiktarDeger] = useState('')
+  const [ozelMiktarBirim, setOzelMiktarBirim] = useState<'kg' | 'metre'>('kg')
 
   useEffect(() => { load() }, [id])
 
@@ -80,7 +142,73 @@ export default function ProjeDetayPage() {
     setFasonFiyatlar(ff || [])
     setProformalar(pr || [])
     if (p?.kato_eni_mm) setHamBobin(String(p.kato_eni_mm))
+
+    const malzemeIdler = Array.from(new Set((k || []).map((x: any) => x.malzeme_id)))
+    if (malzemeIdler.length > 0) {
+      const [{ data: ds }, { data: sak }, { data: rez }] = await Promise.all([
+        supabase.from('depo_stok').select('*').in('malzeme_id', malzemeIdler).order('en_mm'),
+        supabase.from('satinalma_kalem').select('*, siparis:satinalma_siparis(po_no,durum)').eq('proje_id', id),
+        supabase.from('depo_hareket').select('stok_id').eq('proje_id', id).eq('tur', 'rezerve'),
+      ])
+      setDepoStok(ds || [])
+      setSatinalmaKalemleri(sak || [])
+      setBaglanmisLotlar(new Set((rez || []).map((r: any) => r.stok_id)))
+
+      if (p && STOK_KONTROL_DURUMLARI.includes(p.durum)) {
+        await otomatikSatinAlmaKontrol(p, k || [], ds || [], sak || [], t || [], pr || [])
+      }
+    } else {
+      setDepoStok([])
+      setSatinalmaKalemleri([])
+      setBaglanmisLotlar(new Set())
+    }
     setLoading(false)
+  }
+
+  // Eksik malzeme icin, ayni proje+malzeme+mikron icin zaten aktif bir talep yoksa
+  // tek bir "talep" durumunda satin alma siparisi olusturur (idempotent: DB'den kontrol eder).
+  async function otomatikSatinAlmaKontrol(p: any, kats: any[], ds: any[], sak: any[], tekliflerListesi: any[], proformalarListesi: any[]) {
+    const gerekliListe = hesaplaGerekliMiktarlar(p, kats, tekliflerListesi, proformalarListesi)
+    if (gerekliListe.length === 0) return
+    const maxEn = p.kato_eni_mm * (1 + EN_TOLERANS_PCT / 100)
+
+    const eksikler = gerekliListe.map(g => {
+      const uygunStok = ds
+        .filter((d: any) => d.malzeme_id === g.malzeme_id && d.mikron === g.mikron && d.en_mm != null && d.en_mm >= p.kato_eni_mm && d.en_mm <= maxEn)
+        .reduce((s: number, l: any) => s + Number(l.agirlik_kg || 0), 0)
+      const eksikKg = Math.max(0, g.gerekli_kg - uygunStok)
+      const zatenTalepVar = sak.some((kl: any) => kl.malzeme_id === g.malzeme_id && kl.mikron === g.mikron && kl.siparis?.durum !== 'iptal')
+      return { ...g, eksikKg, zatenTalepVar }
+    }).filter(g => g.eksikKg > 0.5 && !g.zatenTalepVar)
+
+    if (eksikler.length === 0) return
+
+    const po_no = await yeniPoNo()
+    const { data: yeniSiparis, error: e1 } = await supabase.from('satinalma_siparis').insert({
+      po_no, tedarikci_id: null, durum: 'talep', para_birimi: 'USD',
+      notlar: `Otomatik olusturuldu — ${p.proje_no} (${p.ad}) siparisi icin eksik hammadde.`,
+    }).select().single()
+    if (e1 || !yeniSiparis) return
+
+    await supabase.from('satinalma_kalem').insert(
+      eksikler.map(g => ({
+        siparis_id: yeniSiparis.id, malzeme_id: g.malzeme_id, proje_id: p.id,
+        mikron: g.mikron, en_mm: Math.ceil(p.kato_eni_mm), miktar_kg: Math.ceil(g.eksikKg),
+      }))
+    )
+  }
+
+  async function lotBagla(lot: any, satir: any) {
+    if (!user) return
+    setRezerveEdiliyor(lot.id)
+    const miktar = Math.min(Number(lot.agirlik_kg), satir.gerekli_kg)
+    const { error } = await supabase.from('depo_hareket').insert({
+      stok_id: lot.id, proje_id: proje.id, tur: 'rezerve', miktar_kg: miktar,
+      aciklama: `${proje.proje_no} icin ayrildi (${satir.malzeme_adi} ${satir.mikron}μm)`,
+      kullanici_id: user.id,
+    })
+    setRezerveEdiliyor(null)
+    if (!error) setBaglanmisLotlar(prev => new Set(prev).add(lot.id))
   }
 
   async function proformaOlustur(f: any) {
@@ -96,6 +224,8 @@ export default function ProjeDetayPage() {
       toplam_tutar: f.satis_fiyati_kg * f.miktar_kg,
       gecerlilik_tarihi: gecerlilik.toISOString().split('T')[0],
       durum: 'gonderildi',
+      tolerans_pct: f.tolerans_pct ?? 15,
+      secilen_metre: f.metre || null,
     }).select().single()
     setProformaOlusturuluyor(null)
     if (error || !data) { setMsg('Proforma olusturulamadi: ' + error?.message); return }
@@ -119,6 +249,37 @@ export default function ProjeDetayPage() {
     const boyaGm2 = baskili ? 2.2 : 0
     const tutkalGm2 = laminasyonSayisi() * 2.0
     return (filmGm2 + boyaGm2 + tutkalGm2) / 1000
+  }
+
+  // Metre -> kg donusumu (hesaplaFiyat'daki ham_m2/net_m2/metre formulunun tersi).
+  // Musteri "1350 metre istiyorum" derse bunu siparis kg'sine cevirip miktarlar listesine ekler.
+  function metreyiKgyeCevir(metre: number): number {
+    const hamBobinMm = parseFloat(hamBobin)
+    const netEnMm = parseFloat(netEn)
+    if (!hamBobinMm || !netEnMm || metre <= 0) return 0
+    const kenarFirePct = ((hamBobinMm - netEnMm) / hamBobinMm) * 100
+    const netM2 = metre * (netEnMm / 1000)
+    const hamM2 = netM2 / (1 - kenarFirePct / 100)
+    return Math.round(hamM2 * mamulKgM2())
+  }
+
+  function miktarEkle() {
+    const deger = parseFloat(ozelMiktarDeger)
+    if (!deger || deger <= 0) { setMsg('Gecerli bir miktar girin.'); return }
+    let kg = deger
+    if (ozelMiktarBirim === 'metre') {
+      kg = metreyiKgyeCevir(deger)
+      if (!kg) { setMsg('Metreyi kg\'a cevirmek icin once ham bobin eni ve net kullanilabilir eni girin.'); return }
+    }
+    kg = Math.round(kg)
+    if (miktarlar.includes(kg)) { setMsg('Bu miktar zaten listede.'); return }
+    setMsg('')
+    setMiktarlar(m => [...m, kg].sort((a, b) => a - b))
+    setOzelMiktarDeger('')
+  }
+
+  function miktarSil(kg: number) {
+    setMiktarlar(m => m.filter(x => x !== kg))
   }
 
   function fasonCiktiTuru(): string | null {
@@ -160,7 +321,7 @@ export default function ProjeDetayPage() {
       baskili: k.baskili,
     }))
 
-    const sonuclar = MIKTARLAR.map(miktar => {
+    const sonuclar = miktarlar.map(miktar => {
       const girdi: FiyatGirdisi = {
         katmanlar: katmanGirdileri,
         laminasyon_sayisi: lam,
@@ -201,9 +362,15 @@ export default function ProjeDetayPage() {
         satis_fiyati_m2: f.satis_fiyati_m2,
         para_birimi: proje?.musteri?.para_birimi || 'USD',
         gecerlilik_tarihi: new Date().toISOString().split('T')[0],
+        tolerans_pct: parseFloat(toleransPct) || 0,
+        metre: f.metre,
       })
     }
-    await supabase.from('proje').update({ durum: 'fiyatlama' }).eq('id', id)
+    // Sadece ilk fiyatlamada durumu ilerlet; zaten proforma gonderilmis/onaylanmis
+    // bir siparis icin yeni fiyat secenegi eklemek durumu geriye almamali.
+    if (proje.durum === 'taslak') {
+      await supabase.from('proje').update({ durum: 'fiyatlama' }).eq('id', id)
+    }
     setFiyatModal(false)
     setHesaplanan([])
     load()
@@ -215,11 +382,34 @@ export default function ProjeDetayPage() {
     load()
   }
 
+  // Is tipi (yeni/tekrar/revizyon), kazan sayisi ve klise takip alanlari icin
+  // genel amacli hizli guncelleme — doluluk ekraninda planlamacinin isi tek
+  // bakista tanimasi icin (bkz. Uretim Planlama > Makine Parkuru).
+  async function projeAlanGuncelle(patch: Record<string, any>) {
+    setProje((p: any) => ({ ...p, ...patch }))
+    await supabase.from('proje').update(patch).eq('id', id)
+  }
+
   if (loading) return <div className="p-8 text-gray-400">Yukleniyor...</div>
   if (!proje) return <div className="p-8 text-red-500">Proje bulunamadi</div>
 
   const fasonTur = fasonCiktiTuru()
   const adetGram = hesaplaAdetGram()
+
+  const stokKontrolGoster = STOK_KONTROL_DURUMLARI.includes(proje.durum)
+  const stokDurumuListesi = stokKontrolGoster && proje.kato_eni_mm
+    ? hesaplaGerekliMiktarlar(proje, katmanlar, teklifler, proformalar).map(g => {
+        const maxEn = proje.kato_eni_mm * (1 + EN_TOLERANS_PCT / 100)
+        const uygunLotlar = depoStok
+          .filter((d: any) => d.malzeme_id === g.malzeme_id && d.mikron === g.mikron && d.en_mm != null && d.en_mm >= proje.kato_eni_mm && d.en_mm <= maxEn)
+          .sort((a: any, b: any) => a.en_mm - b.en_mm)
+        const toplamStok = uygunLotlar.reduce((s: number, l: any) => s + Number(l.agirlik_kg || 0), 0)
+        const eksikKg = Math.max(0, g.gerekli_kg - toplamStok)
+        const durum = eksikKg <= 0.5 ? 'yeterli' : toplamStok > 0 ? 'kismi' : 'yok'
+        const eslesenTalep = satinalmaKalemleri.find((k: any) => k.malzeme_id === g.malzeme_id && k.mikron === g.mikron && k.siparis?.durum !== 'iptal')
+        return { ...g, uygunLotlar, toplamStok, eksikKg, durum, zatenTalepVar: !!eslesenTalep, talepPoNo: eslesenTalep?.siparis?.po_no }
+      })
+    : []
 
   return (
     <div className="p-6 max-w-5xl">
@@ -236,15 +426,28 @@ export default function ProjeDetayPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`badge ${DURUM_BADGE[proje.durum]||'badge-gray'}`}>{DURUM_LABEL[proje.durum]||proje.durum}</span>
+          {['musteri_onayladi', 'uretimde', 'tamamlandi'].includes(proje.durum) && (
+            <a href={`/is-emri/${id}`} target="_blank" rel="noopener noreferrer" className="btn">Is emri yazdir</a>
+          )}
           <button onClick={() => setFiyatModal(true)} className="btn btn-primary">Fiyat hesapla</button>
           {proje.durum === 'fiyatlama' && (
             <button onClick={() => durumGuncelle('proforma_gonderildi')} className="btn btn-warning">Proforma gonderildi</button>
           )}
           {proje.durum === 'proforma_gonderildi' && (
-            <button onClick={() => durumGuncelle('musteri_onayladi')} className="btn btn-success">Musteri onayladi</button>
+            <button onClick={() => durumGuncelle('musteri_onayladi')} className="btn btn-success">Siparis onaylandi, uretime al</button>
           )}
         </div>
       </div>
+      {proje.durum === 'proforma_gonderildi' && (
+        <div className="text-xs text-gray-400 -mt-3 mb-4">
+          Bu butona basildiginda siparis planlamacinin onune "Planlamasi yapilmamis siparisler" listesine dusecek.
+        </div>
+      )}
+      {proje.durum === 'musteri_onayladi' && (
+        <div className="text-xs text-green-600 -mt-3 mb-4">
+          Siparis uretime alindi — Uretim Planlama sayfasinda "Plani olusturulmamis onayli projeler" listesinde planlamaciyi bekliyor.
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-5">
         <div className="col-span-2 space-y-4">
@@ -311,6 +514,98 @@ export default function ProjeDetayPage() {
             </div>
           </div>
 
+          {/* Is tipi + klise takibi — doluluk ekraninda planlamacinin isi hizli
+              tanimasi ve klise masrafinin takip edilmesi icin */}
+          <div className="card">
+            <div className="card-header"><span className="font-medium text-sm">Is tipi & klise takibi</span></div>
+            <div className="card-body">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label>Is tipi</label>
+                  <select value={proje.is_tipi || 'yeni'} onChange={e => projeAlanGuncelle({ is_tipi: e.target.value })}>
+                    <option value="yeni">Yeni is</option>
+                    <option value="tekrar">Tekrar (repeat)</option>
+                    <option value="revizyon">Revizyon</option>
+                  </select>
+                </div>
+                {proje.baskili && (
+                  <div>
+                    <label>Kazan sayisi</label>
+                    <input type="number" value={proje.kazan_sayisi ?? ''} onChange={e => projeAlanGuncelle({ kazan_sayisi: e.target.value ? parseInt(e.target.value) : null })} />
+                  </div>
+                )}
+              </div>
+              {proje.baskili && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="grid grid-cols-3 gap-4 items-end">
+                    <div>
+                      <label>Klise maliyeti</label>
+                      <input type="number" step="0.01" value={proje.klise_maliyeti ?? ''} onChange={e => projeAlanGuncelle({ klise_maliyeti: e.target.value ? parseFloat(e.target.value) : null })} />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm !mb-0">
+                      <input type="checkbox" checked={!!proje.klise_musteriden_tahsil} onChange={e => projeAlanGuncelle({ klise_musteriden_tahsil: e.target.checked })} />
+                      Musteriden tahsil edildi
+                    </label>
+                    <label className="flex items-center gap-2 text-sm !mb-0">
+                      <input type="checkbox" checked={!!proje.klise_tedarikciye_odendi} onChange={e => projeAlanGuncelle({ klise_tedarikciye_odendi: e.target.checked })} />
+                      Klise tedarikcisine odendi
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Stok durumu — siparis onaylandiktan sonra kalici olarak gorunur */}
+          {stokKontrolGoster && (
+            <div className="card">
+              <div className="card-header"><span className="font-medium text-sm">Stok durumu</span></div>
+              <div className="card-body space-y-3">
+                {stokDurumuListesi.length === 0 ? (
+                  <div className="text-gray-400 text-sm text-center py-4">Miktar veya kato eni bilgisi eksik, stok kontrolu yapilamiyor.</div>
+                ) : stokDurumuListesi.map((s: any) => (
+                  <div key={s.malzeme_id + '-' + s.mikron} className="border border-gray-100 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-medium text-sm">{s.malzeme_adi} ({s.mikron}μm)</span>
+                      <span className={`badge ${s.durum === 'yeterli' ? 'badge-green' : s.durum === 'kismi' ? 'badge-amber' : 'badge-red'}`}>
+                        {s.durum === 'yeterli' ? 'Stok yeterli' : s.durum === 'kismi' ? 'Kismi stok' : 'Stokta yok'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mb-2">
+                      Gerekli: {s.gerekli_kg.toFixed(0)} kg (tolerans dahil) · Uygun genislikte stok: {s.toplamStok.toFixed(0)} kg
+                    </div>
+                    {s.uygunLotlar.length > 0 && (
+                      <div className="space-y-1">
+                        {s.uygunLotlar.map((l: any) => (
+                          <div key={l.id} className="flex items-center justify-between bg-gray-50 rounded px-2.5 py-1.5 text-xs">
+                            <span>
+                              {l.lot_no} · {l.en_mm} mm · {Number(l.agirlik_kg).toFixed(0)} kg
+                              {l.en_mm > proje.kato_eni_mm && <span className="text-amber-600 ml-1">(dilimlenecek)</span>}
+                            </span>
+                            {baglanmisLotlar.has(l.id) ? (
+                              <span className="badge badge-green text-xs">Baglandi ✓</span>
+                            ) : (
+                              <button onClick={() => lotBagla(l, s)} disabled={rezerveEdiliyor === l.id} className="btn btn-sm">
+                                {rezerveEdiliyor === l.id ? '...' : 'Bu ise bagla'}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {s.eksikKg > 0.5 && (
+                      <div className="text-xs text-red-600 mt-2">
+                        {s.zatenTalepVar
+                          ? `Eksik ${s.eksikKg.toFixed(0)} kg icin satin alma talebi mevcut${s.talepPoNo ? ` (${s.talepPoNo})` : ''}.`
+                          : `Eksik ${s.eksikKg.toFixed(0)} kg icin otomatik satin alma talebi olusturuldu.`}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Fiyat teklifleri */}
           <div className="card">
             <div className="card-header">
@@ -328,6 +623,7 @@ export default function ProjeDetayPage() {
                   <thead>
                     <tr>
                       <th>Miktar</th>
+                      <th>Metre</th>
                       <th>Satis/kg</th>
                       {proje.cikti_turu !== 'bobin' && <th>Adet agirlik</th>}
                       <th>m² fiyati</th>
@@ -339,7 +635,11 @@ export default function ProjeDetayPage() {
                   <tbody>
                     {teklifler.slice(0, 9).map((f, i) => (
                       <tr key={f.id} className={i === 0 ? 'bg-green-50' : ''}>
-                        <td className="font-medium">{parseFloat(f.miktar_kg).toLocaleString('tr-TR')} kg</td>
+                        <td className="font-medium">
+                          {parseFloat(f.miktar_kg).toLocaleString('tr-TR')} kg
+                          {f.tolerans_pct > 0 && <span className="text-gray-400 text-xs ml-1">(±%{f.tolerans_pct})</span>}
+                        </td>
+                        <td className="text-gray-500 text-xs">{f.metre ? Number(f.metre).toLocaleString('tr-TR') + ' m' : '—'}</td>
                         <td className="font-semibold text-green-700">${parseFloat(f.satis_fiyati_kg || 0).toFixed(4)}</td>
                         {proje.cikti_turu !== 'bobin' && (
                           <td className="text-gray-500 text-xs">{adetGram.toFixed(2)} gr</td>
@@ -369,7 +669,10 @@ export default function ProjeDetayPage() {
                     className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 no-underline">
                     <div>
                       <span className="font-mono text-sm font-medium text-blue-700">{pf.proforma_no}</span>
-                      <span className="text-xs text-gray-500 ml-2">{Number(pf.secilen_miktar_kg).toLocaleString('tr-TR')} kg · ${Number(pf.toplam_tutar).toFixed(2)}</span>
+                      <span className="text-xs text-gray-500 ml-2">
+                        {Number(pf.secilen_miktar_kg).toLocaleString('tr-TR')} kg
+                        {pf.tolerans_pct > 0 && ` (±%${pf.tolerans_pct})`} · ${Number(pf.toplam_tutar).toFixed(2)}
+                      </span>
                     </div>
                     <span className={`badge ${pf.durum === 'onaylandi' ? 'badge-green' : pf.durum === 'reddedildi' ? 'badge-red' : 'badge-amber'}`}>{pf.durum}</span>
                   </Link>
@@ -423,9 +726,37 @@ export default function ProjeDetayPage() {
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-100">
               <div className="font-semibold text-gray-900 text-lg">Fiyat hesapla</div>
-              <div className="text-sm text-gray-500 mt-0.5">{proje.ad} — 500 / 1.000 / 3.000 kg</div>
+              <div className="text-sm text-gray-500 mt-0.5">{proje.ad} — {miktarlar.map(m => m.toLocaleString('tr-TR')).join(' / ')} kg</div>
             </div>
             <div className="p-6 space-y-5">
+
+              {/* Miktarlar */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Hesaplanacak miktarlar</div>
+                <div className="flex gap-2 flex-wrap mb-3">
+                  {miktarlar.map(m => (
+                    <span key={m} className="badge badge-blue flex items-center gap-1.5 text-xs">
+                      {m.toLocaleString('tr-TR')} kg
+                      <button onClick={() => miktarSil(m)} className="text-blue-500 hover:text-blue-800 font-bold leading-none">×</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="number" value={ozelMiktarDeger} onChange={e => setOzelMiktarDeger(e.target.value)}
+                    placeholder="Musteri siparis miktari" className="text-sm flex-1" />
+                  <select value={ozelMiktarBirim} onChange={e => setOzelMiktarBirim(e.target.value as 'kg' | 'metre')} className="text-sm w-28">
+                    <option value="kg">kg</option>
+                    <option value="metre">metre</option>
+                  </select>
+                  <button onClick={miktarEkle} className="btn btn-sm">Ekle</button>
+                </div>
+                <div className="mt-3">
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">Tolerans (%)</label>
+                  <input type="number" value={toleransPct} onChange={e => setToleransPct(e.target.value)}
+                    placeholder="15" className="text-sm w-24" />
+                  <span className="text-xs text-gray-400 ml-2">Proformada "miktar (±%tolerans)" olarak gosterilir</span>
+                </div>
+              </div>
 
               {/* Bobin bilgileri */}
               <div>
@@ -532,6 +863,7 @@ export default function ProjeDetayPage() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Miktar</th>
+                        <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Metre</th>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Net m²</th>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Kenar fire</th>
                         <th className="text-left px-4 py-2.5 text-xs text-gray-500 font-medium">Maliyet/kg</th>
@@ -543,6 +875,7 @@ export default function ProjeDetayPage() {
                       {hesaplanan.map(f => (
                         <tr key={f.miktar} className="border-t border-gray-100">
                           <td className="px-4 py-3 font-medium">{f.miktar.toLocaleString('tr-TR')} kg</td>
+                          <td className="px-4 py-3 text-gray-600">{f.metre ? Number(f.metre).toLocaleString('tr-TR') + ' m' : '—'}</td>
                           <td className="px-4 py-3 text-gray-600">{f.net_m2.toLocaleString('tr-TR')}</td>
                           <td className="px-4 py-3 text-amber-600">%{f.kenar_fire_pct.toFixed(2)}</td>
                           <td className="px-4 py-3 text-gray-600">${f.maliyet_kg.toFixed(4)}</td>

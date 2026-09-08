@@ -1,6 +1,6 @@
 'use client'
 import { Fragment, useEffect, useState } from 'react'
-import { supabase, yeniPoNo } from '@/lib/supabase'
+import { supabase, yeniPoNo, otomatikLotNo } from '@/lib/supabase'
 
 const DURUM_BADGE: Record<string, string> = {
   talep: 'badge-amber', taslak: 'badge-gray', onaylandi: 'badge-blue', gonderildi: 'badge-amber',
@@ -31,8 +31,8 @@ export default function SatinAlmaPage() {
 
   async function load() {
     const [{ data: s }, { data: k }, { data: m }, { data: t }] = await Promise.all([
-      supabase.from('satinalma_siparis').select('*, tedarikci:tedarikci_tanim(ad)').order('olusturma', { ascending: false }),
-      supabase.from('satinalma_kalem').select('*, malzeme:malzeme_tanim(ad,tur)'),
+      supabase.from('satinalma_siparis').select('*, tedarikci:tedarikci_tanim(ad,kod)').order('olusturma', { ascending: false }),
+      supabase.from('satinalma_kalem').select('*, malzeme:malzeme_tanim(ad,tur,kod)'),
       supabase.from('malzeme_tanim').select('*').eq('aktif', true).order('ad'),
       supabase.from('tedarikci_tanim').select('*').eq('aktif', true).order('ad'),
     ])
@@ -271,7 +271,11 @@ export default function SatinAlmaPage() {
                                       <button onClick={() => setTeslimForm(null)} className="btn btn-sm">×</button>
                                     </div>
                                   ) : (
-                                    <button onClick={() => setTeslimForm({ kalemId: k.id, miktar: '', lotNo: '', raf: '' })} className="btn btn-sm btn-success">Teslim al</button>
+                                    <button onClick={async () => {
+                                      setTeslimForm({ kalemId: k.id, miktar: '', lotNo: '...', raf: '' })
+                                      const lot = await otomatikLotNo(s.tedarikci?.kod, k.malzeme?.kod)
+                                      setTeslimForm(p => p && p.kalemId === k.id ? { ...p, lotNo: lot } : p)
+                                    }} className="btn btn-sm btn-success">Teslim al</button>
                                   )
                                 )}
                               </td>

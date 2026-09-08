@@ -4,18 +4,36 @@ import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { LOGO_BASE64 } from '@/lib/logo'
 import Link from 'next/link'
+import { AuthProvider, useAuth } from '@/lib/auth'
 
 const DURUM_LABEL: Record<string, string> = {
   gonderildi: 'Gonderildi', onaylandi: 'Onaylandi', reddedildi: 'Reddedildi', revizyon: 'Revizyon istendi',
 }
 
+const IC_ONAY_LABEL: Record<string, string> = {
+  yok: 'Onay istenmedi', istendi: 'Onay bekleniyor', onaylandi: 'Yonetici onayladi', reddedildi: 'Yonetici reddetti',
+}
+const IC_ONAY_BADGE: Record<string, string> = {
+  yok: 'badge-gray', istendi: 'badge-amber', onaylandi: 'badge-green', reddedildi: 'badge-red',
+}
+
 export default function ProformaPage() {
+  return (
+    <AuthProvider>
+      <ProformaIcerik />
+    </AuthProvider>
+  )
+}
+
+function ProformaIcerik() {
   const { id } = useParams()
   const router = useRouter()
+  const { user } = useAuth()
   const [proforma, setProforma] = useState<any>(null)
   const [proje, setProje] = useState<any>(null)
   const [musteri, setMusteri] = useState<any>(null)
   const [katmanlar, setKatmanlar] = useState<any[]>([])
+  const [kullanicilar, setKullanicilar] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -24,18 +42,40 @@ export default function ProformaPage() {
   async function load() {
     const { data: pf } = await supabase.from('proforma').select('*').eq('id', id).single()
     if (!pf) { setLoading(false); return }
-    const [{ data: p }, { data: m }, { data: k }] = await Promise.all([
+    const [{ data: p }, { data: m }, { data: k }, { data: kul }] = await Promise.all([
       supabase.from('proje').select('*').eq('id', pf.proje_id).single(),
       supabase.from('musteri_tanim').select('*').eq('id', pf.musteri_id).single(),
       supabase.from('proje_katman').select('*, malzeme:malzeme_tanim(ad)').eq('proje_id', pf.proje_id).order('sira'),
+      supabase.from('kullanici_tanim').select('id, ad_soyad'),
     ])
     setProforma(pf); setProje(p); setMusteri(m); setKatmanlar(k || [])
+    setKullanicilar(Object.fromEntries((kul || []).map((u: any) => [u.id, u.ad_soyad])))
     setLoading(false)
   }
 
   async function durumGuncelle(durum: string) {
     setSaving(true)
     await supabase.from('proforma').update({ durum }).eq('id', id)
+    setSaving(false)
+    load()
+  }
+
+  async function onayIste() {
+    if (!user) return
+    setSaving(true)
+    await supabase.from('proforma').update({
+      ic_onay_durumu: 'istendi', onay_isteyen_id: user.id, onaylayan_id: null, onay_tarihi: null, onay_notu: null,
+    }).eq('id', id)
+    setSaving(false)
+    load()
+  }
+
+  async function onayVer(karar: 'onaylandi' | 'reddedildi') {
+    if (!user) return
+    setSaving(true)
+    await supabase.from('proforma').update({
+      ic_onay_durumu: karar, onaylayan_id: user.id, onay_tarihi: new Date().toISOString(),
+    }).eq('id', id)
     setSaving(false)
     load()
   }
@@ -62,6 +102,35 @@ export default function ProformaPage() {
               className={`btn btn-sm ${proforma.durum === d ? 'btn-primary' : ''}`}>{DURUM_LABEL[d]}</button>
           ))}
           <button onClick={() => window.print()} className="btn btn-sm btn-success ml-3">Yazdir / PDF kaydet</button>
+        </div>
+      </div>
+
+      {/* Yonetici onayi (ic onay akisi — musteri durumundan bagimsiz) */}
+      <div className="no-print max-w-3xl mx-auto mb-4 px-2">
+        <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400">Yonetici onayi:</span>
+            <span className={`badge ${IC_ONAY_BADGE[proforma.ic_onay_durumu || 'yok']}`}>
+              {IC_ONAY_LABEL[proforma.ic_onay_durumu || 'yok']}
+            </span>
+            {proforma.onay_isteyen_id && (
+              <span className="text-xs text-gray-400">· isteyen: {kullanicilar[proforma.onay_isteyen_id] || '—'}</span>
+            )}
+            {proforma.onaylayan_id && (
+              <span className="text-xs text-gray-400">· {proforma.ic_onay_durumu === 'reddedildi' ? 'reddeden' : 'onaylayan'}: {kullanicilar[proforma.onaylayan_id] || '—'}</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {user && (user.rol === 'satis' || user.rol === 'admin') && (proforma.ic_onay_durumu || 'yok') !== 'istendi' && (
+              <button onClick={onayIste} disabled={saving} className="btn btn-sm btn-warning">Yoneticiden onay iste</button>
+            )}
+            {user && user.rol === 'admin' && proforma.ic_onay_durumu === 'istendi' && (
+              <>
+                <button onClick={() => onayVer('onaylandi')} disabled={saving} className="btn btn-sm btn-success">Onayla</button>
+                <button onClick={() => onayVer('reddedildi')} disabled={saving} className="btn btn-sm btn-danger">Reddet</button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -114,7 +183,13 @@ export default function ProformaPage() {
                 <br />
                 {katmanlar.map(k => k.malzeme?.ad).join(' + ')}
               </td>
-              <td className="py-3 text-right">{Number(proforma.secilen_miktar_kg).toLocaleString('tr-TR')} kg</td>
+              <td className="py-3 text-right">
+                {Number(proforma.secilen_miktar_kg).toLocaleString('tr-TR')} KG
+                {proforma.tolerans_pct > 0 && ` (±%${proforma.tolerans_pct})`}
+                {proforma.secilen_metre && (
+                  <div className="text-xs text-gray-400 font-normal">≈ {Number(proforma.secilen_metre).toLocaleString('tr-TR')} metre</div>
+                )}
+              </td>
               <td className="py-3 text-right">${Number(proforma.satis_fiyati_kg).toFixed(4)}</td>
               <td className="py-3 text-right font-semibold">${Number(proforma.toplam_tutar).toFixed(2)}</td>
             </tr>
