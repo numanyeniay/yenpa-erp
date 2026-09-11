@@ -16,6 +16,7 @@ const NAV = [
   { href:'/projeler',    label:'Projeler & Teklifler',  icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { href:'/malzemeler',  label:'Malzeme & Fiyatlar',   icon:'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
   { href:'/hesap-makinesi', label:'Hizli Hesap Makinesi', icon:'M9 7h6m-6 4h6m-6 4h3m-9 4h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14a2 2 0 002 2z' },
+  { href:'/baski-analizi', label:'Baski Alani Analizi', icon:'M4 5a1 1 0 011-1h14a1 1 0 011 1v10a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm3 13h10m-7 3h4' },
   { href:'/referanslar', label:'Referanslar', icon:'M4 6h16M4 12h16M4 18h7' },
   { href:'/kalite',      label:'Kalite Kontrol',        icon:'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
   { href:'/planlama',    label:'Uretim Planlama',       icon:'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },

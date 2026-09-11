@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
 import { type CiktiTuru } from '@/types'
-import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, type FiyatGirdisi, type FiyatCiktisi } from '@/lib/fiyatlama'
+import { hesaplaFiyat, adetAgirligiHesapla, fasonFiyatBul, mamulKgM2, type FiyatGirdisi, type FiyatCiktisi } from '@/lib/fiyatlama'
 
 const CIKTI_LABEL: Record<CiktiTuru, string> = {
   bobin: 'Bobin', doypack: 'Doypack', quadro: 'Quadro', flat_bottom: 'Flat bottom',
@@ -18,6 +18,7 @@ interface KatmanSatir {
   malzeme_id: string
   mikron: string
   baskili: boolean
+  baski_yuzde: string // 0-100, sadece baskili=true iken kullanilir
   laminasyon_onceki: boolean
 }
 
@@ -38,11 +39,12 @@ export default function HesapMakinesiPage() {
   const [enMm, setEnMm] = useState('200')
   const [boyMm, setBoyMm] = useState('300')
   const [kurekMm, setKurekMm] = useState('50')
+  const [yanKurekMm, setYanKurekMm] = useState('0') // sadece flat_bottom: yan korugun eni
   const [bobinEnMm, setBobinEnMm] = useState('350') // sadece cikti turu=bobin icin: satilan urunun kendi eni
 
   const [katmanlar, setKatmanlar] = useState<KatmanSatir[]>([
-    { malzeme_id: '', mikron: '20', baskili: true, laminasyon_onceki: false },
-    { malzeme_id: '', mikron: '70', baskili: false, laminasyon_onceki: true },
+    { malzeme_id: '', mikron: '20', baskili: true, baski_yuzde: '100', laminasyon_onceki: false },
+    { malzeme_id: '', mikron: '70', baskili: false, baski_yuzde: '100', laminasyon_onceki: true },
   ])
 
   const [siparisKg, setSiparisKg] = useState('500')
@@ -72,7 +74,7 @@ export default function HesapMakinesiPage() {
   }
 
   function katmanEkle() {
-    setKatmanlar([...katmanlar, { malzeme_id: '', mikron: '', baskili: false, laminasyon_onceki: false }])
+    setKatmanlar([...katmanlar, { malzeme_id: '', mikron: '', baskili: false, baski_yuzde: '100', laminasyon_onceki: false }])
   }
   function katmanSil(i: number) {
     setKatmanlar(katmanlar.filter((_, idx) => idx !== i))
@@ -98,11 +100,12 @@ export default function HesapMakinesiPage() {
         yogunluk: Number(malzeme?.yogunluk) || 0,
         birim_fiyat: guncelFiyat(k.malzeme_id),
         baskili: k.baskili,
+        baski_kaplama_yuzdesi: k.baskili ? (parseFloat(k.baski_yuzde) || 0) : undefined,
       }
     })
 
     const laminasyonSayisi = gecerliKatmanlar.filter(k => k.laminasyon_onceki).length
-    const filmKgM2 = katmanGirdi.reduce((s, k) => s + (k.mikron * k.yogunluk) / 1000, 0)
+    const mamulKgM2Deger = mamulKgM2(katmanGirdi, laminasyonSayisi)
 
     // Fason: sadece parca urunlerde ve kullanici secmisse. Adet agirligini
     // her zaman hesapliyoruz ki tanimli fiyat olmasa bile agirligi gosterebilelim.
@@ -116,7 +119,8 @@ export default function HesapMakinesiPage() {
         en_mm: parseFloat(enMm) || 0,
         boy_mm: parseFloat(boyMm) || 0,
         kurek_mm: parseFloat(kurekMm) || 0,
-        mamul_kg_m2: filmKgM2,
+        yan_kurek_mm: parseFloat(yanKurekMm) || 0,
+        mamul_kg_m2: mamulKgM2Deger,
         zip_var: zipVar,
       })
       if (fasonKullan) {
@@ -165,7 +169,7 @@ export default function HesapMakinesiPage() {
     }
 
     return { sonuc, adetGram, fasonTanimYok, fasonUygulanabilir, adetSayisi, adetBasiSatis, bobinMetre }
-  }, [katmanlar, malzemeler, fiyatlar, fasonFiyatlar, parametre, ciktiTuru, enMm, boyMm, kurekMm, bobinEnMm,
+  }, [katmanlar, malzemeler, fiyatlar, fasonFiyatlar, parametre, ciktiTuru, enMm, boyMm, kurekMm, yanKurekMm, bobinEnMm,
       siparisKg, karPct, zipVar, fasonKullan, isParca, fireYuzdesi])
 
   if (loading) return <div className="p-8 text-gray-400 text-sm">Yukleniyor...</div>
@@ -216,8 +220,14 @@ export default function HesapMakinesiPage() {
                   </div>
                   {(ciktiTuru === 'doypack' || ciktiTuru === 'flat_bottom' || ciktiTuru === 'quadro' || ciktiTuru === 'yan_kesim' || ciktiTuru === 'katlama_torba') && (
                     <div>
-                      <label className="text-xs text-gray-400">Koruk (mm)</label>
+                      <label className="text-xs text-gray-400">{ciktiTuru === 'flat_bottom' ? 'Alt koruk (mm)' : 'Koruk (mm)'}</label>
                       <input type="number" value={kurekMm} onChange={e => setKurekMm(e.target.value)} />
+                    </div>
+                  )}
+                  {ciktiTuru === 'flat_bottom' && (
+                    <div>
+                      <label className="text-xs text-gray-400">Yan koruk eni (mm)</label>
+                      <input type="number" value={yanKurekMm} onChange={e => setYanKurekMm(e.target.value)} />
                     </div>
                   )}
                 </>
@@ -246,6 +256,13 @@ export default function HesapMakinesiPage() {
                 <label className="text-xs flex items-center gap-1 whitespace-nowrap">
                   <input type="checkbox" checked={k.baskili} onChange={e => katmanGuncelle(i, { baskili: e.target.checked })} /> Baskili
                 </label>
+                {k.baskili && (
+                  <label className="text-xs flex items-center gap-1 whitespace-nowrap">
+                    Kaplama
+                    <input type="number" min={0} max={100} value={k.baski_yuzde}
+                      onChange={e => katmanGuncelle(i, { baski_yuzde: e.target.value })} className="!w-14" />%
+                  </label>
+                )}
                 <label className="text-xs flex items-center gap-1 whitespace-nowrap">
                   <input type="checkbox" checked={k.laminasyon_onceki} onChange={e => katmanGuncelle(i, { laminasyon_onceki: e.target.checked })} /> Lamine (bir onceki katmana)
                 </label>

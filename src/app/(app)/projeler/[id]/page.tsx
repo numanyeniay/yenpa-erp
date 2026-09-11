@@ -42,10 +42,10 @@ function hesaplaGerekliMiktarlar(p: any, kats: any[], tekliflerListesi: any[], p
   const gerekliToplamKg = miktarKg * (1 + toleransPct / 100)
 
   const lam = kats.filter((k: any) => k.laminasyon_onceki).length
-  const baskili = kats.some((k: any) => k.baskili)
   const katmanGirdileri = kats.map((k: any) => ({
     malzeme_adi: k.malzeme?.ad || '', malzeme_tur: k.malzeme?.tur || '',
     mikron: k.mikron, yogunluk: k.malzeme?.yogunluk || 0.92, birim_fiyat: 0, baskili: k.baskili,
+    baski_kaplama_yuzdesi: k.baski_kaplama_yuzdesi,
   }))
   const sonuc = hesaplaFiyat({
     katmanlar: katmanGirdileri, laminasyon_sayisi: lam, siparis_kg: gerekliToplamKg,
@@ -244,9 +244,13 @@ export default function ProjeDetayPage() {
   }
 
   function mamulKgM2(): number {
-    const baskili = katmanlar.some(k => k.baskili)
+    // 2026-09 duzeltmesi: boya agirligi artik her katmanin kendi
+    // baski_kaplama_yuzdesi degeriyle agirlikli hesaplaniyor (Numan'in
+    // dogrulamasiyla) — eskiden baskili=true iken kaplama oranindan
+    // bagimsiz hep %100 (2.2 g/m²) varsayiliyordu.
+    const boyaKat = katmanlar.reduce((s, k) => s + (k.baskili ? (k.baski_kaplama_yuzdesi ?? 100) / 100 : 0), 0)
     const filmGm2 = katmanlar.reduce((s, k) => s + (k.mikron * (k.malzeme?.yogunluk || 0.92)), 0)
-    const boyaGm2 = baskili ? 2.2 : 0
+    const boyaGm2 = 2.2 * boyaKat
     const tutkalGm2 = laminasyonSayisi() * 2.0
     return (filmGm2 + boyaGm2 + tutkalGm2) / 1000
   }
@@ -295,6 +299,7 @@ export default function ProjeDetayPage() {
       en_mm: proje.en_mm || 0,
       boy_mm: proje.boy_mm || 0,
       kurek_mm: proje.kurek_mm || 0,
+      yan_kurek_mm: proje.yan_kurek_mm || 0,
       mamul_kg_m2: mamulKgM2(),
       zip_var: proje.zip_var || false,
     })
@@ -305,7 +310,6 @@ export default function ProjeDetayPage() {
     setMsg('')
 
     const lam = laminasyonSayisi()
-    const baskili = katmanlar.some(k => k.baskili)
     const adetGram = hesaplaAdetGram()
     const fasonTur = fasonCiktiTuru()
     const fasonBirimFiyat = fasonTur
@@ -319,6 +323,7 @@ export default function ProjeDetayPage() {
       yogunluk: k.malzeme?.yogunluk || 0.92,
       birim_fiyat: sonFiyatBul(k.malzeme_id),
       baskili: k.baskili,
+      baski_kaplama_yuzdesi: k.baski_kaplama_yuzdesi,
     }))
 
     const sonuclar = miktarlar.map(miktar => {

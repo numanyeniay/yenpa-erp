@@ -40,7 +40,7 @@ const ADIM_RENK: Record<string, string> = {
 interface FormState {
   musteri_id: string; ad: string; aciklama: string
   cikti_turu: string
-  en_mm: string; boy_mm: string; kurek_mm: string; kapak_mm: string
+  en_mm: string; boy_mm: string; kurek_mm: string; yan_kurek_mm: string; kapak_mm: string
   bobin_en_mm: string; bobin_cap_mm: string; bobin_metre: string
   urun_bobin_en_mm: string; bant_sayisi: string
   baskili: boolean; baskili_yuz: string; renk_sayisi: string
@@ -62,7 +62,7 @@ export default function YeniProjePage() {
   const [form, setForm] = useState<FormState>({
     musteri_id:'', ad:'', aciklama:'',
     cikti_turu:'bobin',
-    en_mm:'', boy_mm:'', kurek_mm:'', kapak_mm:'',
+    en_mm:'', boy_mm:'', kurek_mm:'', yan_kurek_mm:'', kapak_mm:'',
     bobin_en_mm:'', bobin_cap_mm:'', bobin_metre:'',
     urun_bobin_en_mm:'', bant_sayisi:'',
     baskili:false, baskili_yuz:'ust', renk_sayisi:'1',
@@ -75,7 +75,7 @@ export default function YeniProjePage() {
   })
 
   const [katmanlar, setKatmanlar] = useState<ProjeKatman[]>([
-    { sira:1, malzeme_id:'', mikron:0, baskili:false, laminasyon_onceki:false }
+    { sira:1, malzeme_id:'', mikron:0, baskili:false, baski_kaplama_yuzdesi:100, laminasyon_onceki:false }
   ])
 
   useEffect(() => {
@@ -95,7 +95,7 @@ export default function YeniProjePage() {
   function katmanEkle() {
     setKatmanlar(p => [...p, {
       sira: p.length + 1,
-      malzeme_id:'', mikron:0, baskili:false,
+      malzeme_id:'', mikron:0, baskili:false, baski_kaplama_yuzdesi:100,
       laminasyon_onceki: p.length > 0,
     }])
   }
@@ -158,6 +158,7 @@ export default function YeniProjePage() {
       en_mm: n(form.en_mm) || null,
       boy_mm: n(form.boy_mm) || null,
       kurek_mm: n(form.kurek_mm) || null,
+      yan_kurek_mm: form.cikti_turu === 'flat_bottom' ? (n(form.yan_kurek_mm) || null) : null,
       kapak_mm: n(form.kapak_mm) || null,
       bobin_en_mm: n(form.bobin_en_mm) || null,
       bobin_cap_mm: n(form.bobin_cap_mm) || null,
@@ -261,8 +262,12 @@ export default function YeniProjePage() {
                   <input type="number" value={form.en_mm} onChange={e => setF('en_mm', e.target.value)} placeholder="200" /></div>
                 <div><label>Boy (mm)</label>
                   <input type="number" value={form.boy_mm} onChange={e => setF('boy_mm', e.target.value)} placeholder="300" /></div>
-                <div><label>Kurek / korpus (mm)</label>
+                <div><label>{form.cikti_turu === 'flat_bottom' ? 'Alt korpus (mm)' : 'Kurek / korpus (mm)'}</label>
                   <input type="number" value={form.kurek_mm} onChange={e => setF('kurek_mm', e.target.value)} placeholder="50" /></div>
+                {form.cikti_turu === 'flat_bottom' && (
+                  <div><label>Yan korpus eni (mm)</label>
+                    <input type="number" value={form.yan_kurek_mm} onChange={e => setF('yan_kurek_mm', e.target.value)} placeholder="30" /></div>
+                )}
                 <div><label>Kapak payi (mm)</label>
                   <input type="number" value={form.kapak_mm} onChange={e => setF('kapak_mm', e.target.value)} placeholder="50" /></div>
                 <div><label>Yan yana baski</label>
@@ -340,6 +345,15 @@ export default function YeniProjePage() {
                         onChange={e => katmanGuncelle(i, 'baskili', e.target.checked)} className="w-auto" />
                       <span className="text-xs text-gray-600">Bu katmana baski var</span>
                     </label>
+                    {k.baskili && (
+                      <label className="flex items-center gap-2 mb-0">
+                        <span className="text-xs text-gray-600 whitespace-nowrap">Kaplama yuzdesi</span>
+                        <input type="number" min={0} max={100} value={k.baski_kaplama_yuzdesi ?? 100}
+                          onChange={e => katmanGuncelle(i, 'baski_kaplama_yuzdesi', parseFloat(e.target.value) || 0)}
+                          className="!w-16" />
+                        <span className="text-xs text-gray-600">%</span>
+                      </label>
+                    )}
                     {i > 0 && (
                       <label className="flex items-center gap-2 cursor-pointer mb-0">
                         <input type="checkbox" checked={k.laminasyon_onceki}

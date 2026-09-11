@@ -100,6 +100,7 @@ export interface ProjeKatman {
   malzeme_id: string
   mikron: number
   baskili: boolean
+  baski_kaplama_yuzdesi?: number // 0-100, sadece baskili=true iken anlamli; bos ise 100 (tam kaplama) varsayilir
   laminasyon_onceki: boolean
   notlar?: string
   malzeme?: MalzemeTanim
@@ -116,6 +117,7 @@ export interface Proje {
   en_mm?: number
   boy_mm?: number
   kurek_mm?: number
+  yan_kurek_mm?: number // flat_bottom icin: yan korugun eni (mm). kurek_mm bu urun turunde alt korugu temsil eder.
   kapak_mm?: number
   bobin_en_mm?: number
   bobin_cap_mm?: number

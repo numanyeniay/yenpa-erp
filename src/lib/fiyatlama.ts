@@ -41,6 +41,7 @@ export interface KatmanGirdisi {
   yogunluk: number   // g/cm³
   birim_fiyat: number // USD/kg
   baskili: boolean
+  baski_kaplama_yuzdesi?: number // 0-100, sadece baskili=true iken anlamli; belirtilmezse 100 (tam kaplama) varsayilir
 }
 
 export interface FiyatGirdisi {
@@ -121,11 +122,12 @@ const BOYA_KALAN_GM2 = 2.2
 const TUTKAL_GM2_LAMINASYON = 2.0
 
 export function hesaplaFiyat(g: FiyatGirdisi): FiyatCiktisi {
-  const baskili = g.katmanlar.some(k => k.baskili)
+  const boyaKat = baskiKatsayisi(g.katmanlar)
+  const baskili = boyaKat > 0
 
   // 1. Ham m² (kenar traşı öncesi)
   const ham_m2 = g.bobin_en_mm > 0
-    ? g.siparis_kg / mamulKgM2(g.katmanlar, baskili, g.laminasyon_sayisi)
+    ? g.siparis_kg / mamulKgM2(g.katmanlar, g.laminasyon_sayisi)
     : 0
 
   // 2. Kenar fire oranı
@@ -150,9 +152,12 @@ export function hesaplaFiyat(g: FiyatGirdisi): FiyatCiktisi {
   const film_kg = katmanDetaylar.reduce((s, k) => s + k.toplam_kg, 0)
   const film_tutar = katmanDetaylar.reduce((s, k) => s + k.tutar, 0)
 
-  // 6. Boya (ham m² üzerinden)
-  const boya_kullanilan_kg = baskili ? ham_m2 * BOYA_KULLANILAN_GM2 / 1000 : 0
-  const boya_kalan_kg = baskili ? ham_m2 * BOYA_KALAN_GM2 / 1000 : 0
+  // 6. Boya (ham m² üzerinden, gercek baski kaplama yuzdesine gore agirlikli —
+  // 2026-09 duzeltmesi: eskiden baskili=true iken kaplama oranindan bagimsiz
+  // hep %100 varsayiliyordu, Numan'in duzeltmesiyle artik her katmanin kendi
+  // baski_kaplama_yuzdesi degeriyle carpiliyor)
+  const boya_kullanilan_kg = ham_m2 * BOYA_KULLANILAN_GM2 * boyaKat / 1000
+  const boya_kalan_kg = ham_m2 * BOYA_KALAN_GM2 * boyaKat / 1000
   const boya_tutar = boya_kullanilan_kg * g.boya_fiyat_kg
 
   // 7. Tutkal (ham m² × laminasyon sayısı × 2 g/m²)
@@ -211,10 +216,19 @@ export function hesaplaFiyat(g: FiyatGirdisi): FiyatCiktisi {
   }
 }
 
+// Katmanlardaki baskili + baski_kaplama_yuzdesi degerlerinden toplam "baski
+// katsayisi" hesaplar (orn. 1 katman %100 baskili ise katsayi = 1; 2 katman
+// ayri ayri %100 baskiliysa katsayi = 2; %50 kaplamali tek katman ise 0.5).
+// Bu katsayi BOYA_KULLANILAN_GM2 / BOYA_KALAN_GM2 ile carpilarak gercek
+// kaplama oranina gore boya miktari bulunur.
+function baskiKatsayisi(katmanlar: KatmanGirdisi[]): number {
+  return katmanlar.reduce((s, k) => s + (k.baskili ? (k.baski_kaplama_yuzdesi ?? 100) / 100 : 0), 0)
+}
+
 // Mamul kg/m² hesabı
-function mamulKgM2(katmanlar: KatmanGirdisi[], baskili: boolean, laminasyon: number): number {
+export function mamulKgM2(katmanlar: KatmanGirdisi[], laminasyon: number): number {
   const film = katmanlar.reduce((s, k) => s + (k.mikron * k.yogunluk) / 1000, 0)
-  const boya = baskili ? BOYA_KALAN_GM2 / 1000 : 0
+  const boya = (BOYA_KALAN_GM2 * baskiKatsayisi(katmanlar)) / 1000
   const tutkal = laminasyon * TUTKAL_GM2_LAMINASYON / 1000
   return film + boya + tutkal
 }
@@ -251,7 +265,8 @@ export function adetAgirligiHesapla(params: {
   cikti_turu: string
   en_mm: number
   boy_mm: number
-  kurek_mm: number
+  kurek_mm: number      // doypack/quadro/sirt_kaynak icin korugu; flat_bottom icin ALT korugu temsil eder
+  yan_kurek_mm?: number // sadece flat_bottom: yan korugun eni (mm)
   mamul_kg_m2: number  // toplam mamul yoğunluğu kg/m²
   zip_var: boolean
   zip_gram_metre?: number  // default 5.5 g/m
@@ -259,20 +274,28 @@ export function adetAgirligiHesapla(params: {
   const en_cm = params.en_mm / 10
   const boy_cm = params.boy_mm / 10
   const kurek_cm = (params.kurek_mm || 0) / 10
+  const yan_kurek_cm = (params.yan_kurek_mm || 0) / 10
   const zip_gm = params.zip_gram_metre ?? 5.5
 
   let alan_cm2 = 0
   const ct = params.cikti_turu
 
   if (ct === 'doypack') {
-    // Kato eni = boy*2 + körük, ürün eni = en + körük
-    // Alan = (boy*2 + körük) × (en + körük)
-    alan_cm2 = (boy_cm * 2 + kurek_cm) * (en_cm + kurek_cm)
+    // Kato eni = boy*2 + körük, ürün eni = en (körük genislik tarafina eklenmez)
+    // Alan = (boy*2 + körük) × en
+    // 2026-09 duzeltmesi: Numan'in dogrulamasiyla — eskiden yanlislikla
+    // (en + körük) kullaniliyordu, bu agirligi/maliyeti sistematik olarak
+    // sise yaptiriyordu (orn. bir test urununde ~7.6g yerine dogrusu ~4.9g)
+    alan_cm2 = (boy_cm * 2 + kurek_cm) * en_cm
   } else if (ct === 'quadro') {
     // (en×2 + körük×2) × boy
     alan_cm2 = ((en_cm * 2) + (kurek_cm * 2)) * boy_cm
   } else if (ct === 'flat_bottom') {
-    alan_cm2 = (boy_cm * 2 + kurek_cm) * (en_cm + kurek_cm)
+    // Flat bottom hem alt hem yan koruklu: on+arka panel (en × (boy*2+alt korük))
+    // artı iki yan korük paneli (yan_korük_eni × 2 × boy).
+    // 2026-09 duzeltmesi: Numan'in dogrulamasiyla, eskiden doypack ile ayni
+    // (yanlis) formul kullaniliyordu.
+    alan_cm2 = en_cm * (boy_cm * 2 + kurek_cm) + (yan_kurek_cm * 2 * boy_cm)
   } else if (ct === 'sirt_kaynak') {
     // Kato eni = en×2 + bindirme (her taraftan 1cm, toplam 2cm) — bkz. types/katoEniHesapla
     // Alan = kato eni × boy
